@@ -1,0 +1,65 @@
+import os
+from typing import Dict, Any, Optional
+import openai
+from openai import AsyncOpenAI
+
+# Configuración
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+DEFAULT_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "300"))
+DEFAULT_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.2"))
+
+# Cliente OpenAI async
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+async def generar_respuesta_openai(
+    prompt: str,
+    system_prompt: Optional[str] = None,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    temperature: float = DEFAULT_TEMPERATURE,
+    **kwargs
+) -> str:
+    """
+    Genera una respuesta usando OpenAI de forma asíncrona.
+    """
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY no configurada")
+    
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+    
+    try:
+        response = await client.chat.completions.create(
+            model=DEFAULT_MODEL,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            **kwargs
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        raise Exception(f"Error al consultar OpenAI: {str(e)}")
+
+async def generar_respuesta(
+    prompt: str,
+    llm: str = "openai",
+    system_prompt: Optional[str] = None,
+    **kwargs
+) -> str:
+    """
+    Función principal para generar respuestas usando diferentes LLMs.
+    Por ahora solo soporta OpenAI, pero está diseñada para ser extensible.
+    """
+    if llm == "openai":
+        return await generar_respuesta_openai(prompt, system_prompt=system_prompt, **kwargs)
+    # Aquí puedes agregar otros LLMs en el futuro:
+    # elif llm == "gemini":
+    #     return await generar_respuesta_gemini(prompt, **kwargs)
+    # elif llm == "cohere":
+    #     return await generar_respuesta_cohere(prompt, **kwargs)
+    # elif llm == "local":
+    #     return await generar_respuesta_local(prompt, **kwargs)
+    else:
+        raise ValueError(f"LLM no soportado: {llm}") 
