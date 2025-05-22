@@ -13,16 +13,23 @@ import logging
 
 router = APIRouter(prefix="/productos", tags=["productos"])
 
+MAX_CSV_SIZE_MB = 2  # Máximo 2MB por archivo
+MAX_PRODUCTOS_CSV = 1000  # Máximo 1000 productos por carga
+
 # Listar productos
 @router.get("/", response_model=List[ProductoOut])
 async def listar_productos(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    result = await db.execute(
-        select(Producto).where(Producto.empresa_id == current_user.empresa_id)
-    )
-    return result.scalars().all()
+    try:
+        result = await db.execute(
+            select(Producto).where(Producto.empresa_id == current_user.empresa_id)
+        )
+        return result.scalars().all()
+    except Exception as e:
+        logging.error(f"Error al listar productos: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error interno al listar productos")
 
 # Reemplazar inventario por CSV (borra todos y agrega los del CSV)
 @router.post("/reemplazar_csv", response_model=List[ProductoOut])
@@ -31,14 +38,23 @@ async def reemplazar_inventario_csv(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
+    # Validar extensión y tamaño de archivo
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="El archivo debe ser un CSV")
+    file.file.seek(0, 2)
+    size_mb = file.file.tell() / (1024 * 1024)
+    file.file.seek(0)
+    if size_mb > MAX_CSV_SIZE_MB:
+        raise HTTPException(status_code=400, detail=f"El archivo CSV supera el tamaño máximo permitido de {MAX_CSV_SIZE_MB}MB")
     try:
         productos_data = parse_csv_productos(file.file)
     except Exception as e:
+        logging.error(f"Error al procesar el CSV: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Error al procesar el CSV: {str(e)}")
     if not productos_data:
         raise HTTPException(status_code=400, detail="El archivo CSV no contiene productos válidos")
+    if len(productos_data) > MAX_PRODUCTOS_CSV:
+        raise HTTPException(status_code=400, detail=f"El archivo CSV contiene más de {MAX_PRODUCTOS_CSV} productos")
     try:
         async with db.begin():
             # Traer productos actuales de la empresa
@@ -107,7 +123,9 @@ async def reemplazar_inventario_csv(
             )
         )
         return result.scalars().all()
+    except HTTPException:
+        raise
     except Exception as e:
         await db.rollback()
         logging.error(f"Error en reemplazo_csv: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en la operación de reemplazo: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error interno en la operación de reemplazo de inventario")

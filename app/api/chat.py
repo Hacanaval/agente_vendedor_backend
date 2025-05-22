@@ -8,12 +8,13 @@ from typing import Dict, Any, Optional
 from app.services.rag import consultar_rag
 from pydantic import BaseModel, Field
 import logging
+from app.services.clasificacion_tipo_llm import clasificar_tipo_mensaje_llm
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 class ChatRequest(BaseModel):
     mensaje: str = Field(..., min_length=1, max_length=1000)
-    tipo: str = Field(default="inventario", pattern="^(inventario|contexto)$")
+    tipo: Optional[str] = Field(default=None, pattern="^(inventario|contexto|venta)$")
     tono: str = Field(default="formal", pattern="^(formal|informal|amigable|profesional)$")
     instrucciones: str = Field(default="", max_length=500)
     llm: str = Field(default="openai", pattern="^(openai|gemini|cohere|local)$")
@@ -25,9 +26,10 @@ async def chat(
     current_user: Usuario = Depends(get_current_user)
 ):
     """
-    Endpoint de chat tipo RAG: responde consultas de inventario o contexto según tipo.
+    Endpoint de chat tipo RAG: responde consultas de inventario, venta o contexto según tipo.
+    Si 'tipo' no viene, se clasifica automáticamente usando LLM.
     
-    - tipo: "inventario" (consulta productos) o "contexto" (consulta info empresa)
+    - tipo: "inventario" (consulta productos), "contexto" (consulta info empresa) o "venta" (consulta info venta)
     - tono: "formal", "informal", "amigable", "profesional"
     - instrucciones: instrucciones adicionales para el LLM
     - llm: modelo de lenguaje a usar (por ahora solo "openai")
@@ -38,10 +40,15 @@ async def chat(
         if not empresa:
             raise HTTPException(status_code=404, detail="Empresa no encontrada")
 
+        # Clasificación automática si no viene tipo
+        tipo = req.tipo
+        if not tipo:
+            tipo = await clasificar_tipo_mensaje_llm(req.mensaje)
+
         # Consultar RAG
         respuesta = await consultar_rag(
             mensaje=req.mensaje,
-            tipo=req.tipo,
+            tipo=tipo,
             empresa_id=current_user.empresa_id,
             db=db,
             nombre_agente=current_user.nombre,

@@ -2,6 +2,8 @@ import os
 from typing import Dict, Any, Optional
 import openai
 from openai import AsyncOpenAI
+import asyncio
+import logging
 
 # Configuración
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -17,30 +19,35 @@ async def generar_respuesta_openai(
     system_prompt: Optional[str] = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     temperature: float = DEFAULT_TEMPERATURE,
+    reintentos: int = 3,
     **kwargs
 ) -> str:
     """
-    Genera una respuesta usando OpenAI de forma asíncrona.
+    Genera una respuesta usando OpenAI de forma asíncrona, con reintentos y logging robusto.
     """
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY no configurada")
-    
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
-    
-    try:
-        response = await client.chat.completions.create(
-            model=DEFAULT_MODEL,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            **kwargs
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        raise Exception(f"Error al consultar OpenAI: {str(e)}")
+    delay = 1
+    for intento in range(1, reintentos + 1):
+        try:
+            response = await client.chat.completions.create(
+                model=DEFAULT_MODEL,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                **kwargs
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logging.error(f"Error al consultar OpenAI (intento {intento}): {str(e)}")
+            if intento == reintentos:
+                raise Exception(f"Error al consultar OpenAI tras {reintentos} intentos: {str(e)}")
+            await asyncio.sleep(delay)
+            delay *= 2
 
 async def generar_respuesta(
     prompt: str,
