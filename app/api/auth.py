@@ -47,20 +47,24 @@ async def register(data: UsuarioRegister, db: AsyncSession = Depends(get_db)):
             raise HTTPException(status_code=400, detail="Empresa no encontrada")
         rol = "vendedor"
     elif data.empresa:
-        empresa = Empresa(
-            nombre=data.empresa.nombre,
-            email=data.empresa.email,
-            telefono=data.empresa.telefono,
-            logo_url=data.empresa.logo_url
-        )
-        db.add(empresa)
-        await db.flush()
-        rol = "admin"
+        # Si se envía un email de empresa, se busca si ya existe (por ejemplo, info@sextinvalle.com) y se usa esa empresa en lugar de crear una nueva.
+        result = await db.execute(select(Empresa).where(Empresa.email == data.empresa.email))
+        empresa = result.scalar_one_or_none()
+        if empresa:
+            rol = "vendedor"  # (o el rol que se desee para el bot)
+        else:
+            empresa = Empresa(nombre=data.empresa.nombre, email=data.empresa.email, telefono=data.empresa.telefono, logo_url=data.empresa.logo_url)
+            db.add(empresa)
+            await db.flush()
+            rol = "admin"
     else:
         raise HTTPException(status_code=400, detail="Datos de empresa requeridos")
+    # Si el email del usuario (por ejemplo, bot@sextinvalle.com) ya existe, se borra (delete) el usuario existente y se vuelve a crear (para regenerar el token fijo).
     result = await db.execute(select(Usuario).where(Usuario.email == data.email))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Email ya registrado")
+    usuario_existente = result.scalar_one_or_none()
+    if usuario_existente:
+        await db.delete(usuario_existente)
+        await db.commit()
     usuario = Usuario(
         empresa_id=empresa.id,
         nombre=data.nombre,

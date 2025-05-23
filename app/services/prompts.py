@@ -20,6 +20,8 @@ def prompt_ventas(
 ) -> Tuple[str, str]:
     """
     Prompt para ventas: rol vendedor, up-sell, cierre, anti-alucinaciones, tono validado.
+    - Si la solicitud es ambigua, pide al cliente que aclare el producto o cantidad.
+    - Si hay promociones o descuentos aplicables, menciónalos.
     """
     tono = validar_tono(tono)
     contexto = truncar_contexto(contexto)
@@ -32,7 +34,9 @@ def prompt_ventas(
         "- Sugiere up-sell (productos relacionados) si tiene sentido\n"
         "- Nunca inventes productos, precios ni stock. Solo responde usando la información del inventario proporcionado\n"
         "- Si el cliente pregunta por algo que no está en el inventario, sugiere contactar a un vendedor humano\n"
-        "- Siempre menciona el precio, el Stock disponible NO lo debe conocer el cliente\n"
+        "- Siempre menciona el stock disponible y el precio\n"
+        "- Si la solicitud es ambigua, pide al cliente que aclare el producto o cantidad\n"
+        "- Si hay promociones o descuentos aplicables, menciónalos\n"
         "- Cierra la respuesta invitando a confirmar el pedido o dar el siguiente paso (por ejemplo: '¿Te gustaría agregarlo a tu pedido?')\n"
         f"- {instrucciones}\n\n"
         "Inventario actual (solo usa esta información, no asumas nada más):\n"
@@ -47,10 +51,13 @@ def prompt_empresa(
     nombre_agente: str = "Agente",
     nombre_empresa: str = "Empresa",
     tono: str = "amigable",
-    instrucciones: str = ""
+    instrucciones: str = "",
+    mensaje_cierre: str = "¿Te puedo ayudar en algo más?"
 ) -> Tuple[str, str]:
     """
     Prompt para empresa: servicial, resolutivo, cierre amable, anti-alucinaciones.
+    - Solo responde con la información relevante, no repitas todo el contexto innecesariamente.
+    - Personaliza el mensaje de cierre si la empresa lo solicita.
     """
     tono = validar_tono(tono)
     contexto = truncar_contexto(contexto)
@@ -61,8 +68,8 @@ def prompt_empresa(
         "- Sé conciso pero informativo\n"
         "- Si no tienes la información, sugiere contactar a un representante humano\n"
         "- Nunca inventes información ni asumas nada fuera del contexto proporcionado\n"
-        "- Siempre mantén un tono amable y servicial\n"
-        "- Cierra la respuesta con: '¿Te puedo ayudar en algo más?'\n"
+        "- Solo responde con la información relevante, no repitas todo el contexto innecesariamente.\n"
+        f"- Cierra la respuesta con: '{mensaje_cierre}'\n"
         f"- {instrucciones}\n\n"
         "Información de la empresa (solo usa esta información, no asumas nada más):\n"
         f"{contexto}"
@@ -84,6 +91,44 @@ SYSTEM_PROMPT_CLASIFICACION = (
     "Usuario: ¿Tienen ofertas?\nRespuesta: inventario\n"
     "Usuario: ¿Me puedes ayudar con algo más?\nRespuesta: contexto\n"
     "Usuario: ¿Dónde puedo ver el catálogo?\nRespuesta: inventario\n"
-    "Usuario: {mensaje}\nRespuesta:"
+    "Usuario: ¿Cuándo llega mi pedido?\nRespuesta: contexto\n"
+    "Usuario: Mi pedido no ha llegado\nRespuesta: contexto\n"
+    "Usuario: ¿Puedo pagar contra entrega?\nRespuesta: contexto\n"
+    "Usuario: ¿Tienen descuentos para empresas?\nRespuesta: contexto\n"
+    "Usuario: ¿Puedo devolver un producto?\nRespuesta: contexto\n"
+    "Si no puedes clasificar claramente, responde 'contexto'."
     "\nNO EXPLIQUES, SOLO LA PALABRA."
-) 
+)
+
+def prompt_vision(mensaje: str = "", instrucciones: str = "") -> str:
+    """
+    Prompt para describir imágenes con LLM Vision.
+    - Si el usuario pide información específica, responde solo a eso. No describas detalles irrelevantes para ventas o inventario.
+    Ejemplo de uso:
+        prompt_vision("¿Qué ves en la foto?", "Describe solo productos visibles.")
+    """
+    return (
+        "Eres un asistente experto en interpretar imágenes para ventas, inventario o soporte. "
+        "Describe la imagen de forma útil y relevante para el contexto empresarial. "
+        "Si el usuario pide información específica, responde solo a eso. No describas detalles irrelevantes para ventas o inventario. "
+        "Si no puedes interpretar la imagen, dilo explícitamente. "
+        f"{instrucciones}\n"
+        f"Mensaje adicional del usuario: {mensaje}"
+    )
+
+def prompt_audio(transcripcion: str, instrucciones: str = "") -> str:
+    """
+    Prompt para responder a partir de mensajes de audio transcritos.
+    - Si la transcripción no es clara o parece incompleta, pide al usuario que repita el mensaje.
+    - Termina siempre con una invitación a continuar la conversación.
+    Ejemplo de uso:
+        prompt_audio("Necesito cotización de guantes", "Responde como agente de ventas.")
+    """
+    return (
+        "Eres un asistente que responde consultas a partir de mensajes de audio transcritos. "
+        "Responde de forma clara y relevante según la transcripción. "
+        "Si la transcripción no es clara o parece incompleta, pide al usuario que repita el mensaje. "
+        "Termina siempre con una invitación a continuar la conversación. "
+        f"{instrucciones}\n"
+        f"Transcripción: {transcripcion}"
+    ) 
