@@ -18,26 +18,18 @@ MAX_PRODUCTOS_CSV = 1000  # Máximo 1000 productos por carga
 
 # Listar productos
 @router.get("/", response_model=List[ProductoOut])
-async def listar_productos(
-    db: AsyncSession = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
-):
-    try:
-        result = await db.execute(
-            select(Producto).where(Producto.empresa_id == current_user.empresa_id)
-        )
-        return result.scalars().all()
-    except Exception as e:
-        logging.error(f"Error al listar productos: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno al listar productos")
+async def listar_productos(db: AsyncSession = Depends(get_db)):
+    # TODO: Volver a filtrar por empresa_id y proteger con autenticación en producción
+    result = await db.execute(select(Producto).where(Producto.empresa_id == 1))
+    return result.scalars().all()
 
 # Reemplazar inventario por CSV (borra todos y agrega los del CSV)
 @router.post("/reemplazar_csv", response_model=List[ProductoOut])
 async def reemplazar_inventario_csv(
     file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
+    db: AsyncSession = Depends(get_db)
 ):
+    # TODO: Volver a filtrar por empresa_id y proteger con autenticación en producción
     # Validar extensión y tamaño de archivo
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="El archivo debe ser un CSV")
@@ -57,10 +49,8 @@ async def reemplazar_inventario_csv(
         raise HTTPException(status_code=400, detail=f"El archivo CSV contiene más de {MAX_PRODUCTOS_CSV} productos")
     try:
         async with db.begin():
-            # Traer productos actuales de la empresa
-            result = await db.execute(
-                select(Producto).where(Producto.empresa_id == current_user.empresa_id)
-            )
+            # Traer productos actuales de la empresa fija (id=1)
+            result = await db.execute(select(Producto).where(Producto.empresa_id == 1))
             productos_actuales = result.scalars().all()
             productos_actuales_dict = {p.nombre: p for p in productos_actuales}
             productos_actualizados = []
@@ -79,7 +69,7 @@ async def reemplazar_inventario_csv(
                     productos_actualizados.append(producto)
                 else:
                     producto = Producto(
-                        empresa_id=current_user.empresa_id,
+                        empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
                         nombre=data["nombre"],
                         descripcion=data["descripcion"],
                         precio=data["precio"],
@@ -102,22 +92,11 @@ async def reemplazar_inventario_csv(
             productos_creados_dict = [ProductoOut.model_validate(p).model_dump() for p in productos_nuevos]
             productos_actualizados_dict = [ProductoOut.model_validate(p).model_dump() for p in productos_actualizados]
             productos_stock_cero_dict = [ProductoOut.model_validate(p).model_dump() for p in productos_stock_cero]
-            await registrar_log(
-                db=db,
-                empresa_id=current_user.empresa_id,
-                usuario_id=current_user.id,
-                modelo="producto",
-                accion="reemplazo_inventario",
-                detalle={
-                    "productos_creados": productos_creados_dict,
-                    "productos_actualizados": productos_actualizados_dict,
-                    "productos_stock_cero": productos_stock_cero_dict
-                }
-            )
+            # TODO: Volver a registrar logs con usuario_id y empresa_id en multiempresa
         # Solo devolvemos los productos vigentes (stock > 0 y activos)
         result = await db.execute(
             select(Producto).where(
-                Producto.empresa_id == current_user.empresa_id,
+                Producto.empresa_id == 1,
                 Producto.stock > 0,
                 Producto.activo == True
             )

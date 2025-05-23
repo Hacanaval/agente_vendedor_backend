@@ -20,14 +20,14 @@ router = APIRouter(
 @router.post("/", response_model=VentaOut)
 async def crear_venta(
     data: VentaCreate,
-    db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(get_current_user)
+    db: AsyncSession = Depends(get_db)
 ):
+    # TODO: Volver a proteger con autenticación y multiempresa en producción
     try:
         # 1. Validar que el producto exista y pertenezca a la empresa
         result = await db.execute(select(Producto).where(
             Producto.id == data.producto_id,
-            Producto.empresa_id == usuario.empresa_id
+            Producto.empresa_id == 1  # TODO: Volver a usar empresa_id dinámico en multiempresa
         ))
         producto = result.scalar_one_or_none()
         if not producto:
@@ -41,9 +41,9 @@ async def crear_venta(
 
         # 3. Registrar venta
         venta = Venta(
-            empresa_id=usuario.empresa_id,
+            empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
             producto_id=producto.id,
-            usuario_id=usuario.id,
+            usuario_id=None,  # TODO: Volver a asociar usuario en multiempresa
             cantidad=data.cantidad,
             total=producto.precio * data.cantidad
         )
@@ -52,20 +52,7 @@ async def crear_venta(
         await db.refresh(venta)
 
         # 4. Registrar log
-        await registrar_log(
-            db=db,
-            empresa_id=usuario.empresa_id,
-            usuario_id=usuario.id,
-            modelo="venta",
-            accion="vendido",
-            detalle={"venta": {
-                "id": venta.id,
-                "producto_id": venta.producto_id,
-                "usuario_id": venta.usuario_id,
-                "cantidad": venta.cantidad,
-                "total": venta.total
-            }}
-        )
+        # TODO: Volver a registrar logs con usuario_id y empresa_id en multiempresa
         await db.commit()
         return venta
     except HTTPException:
@@ -76,45 +63,31 @@ async def crear_venta(
         raise HTTPException(status_code=500, detail="Error interno al crear la venta")
 
 @router.get("/", response_model=List[VentaOut])
-async def listar_ventas(
-    db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(get_current_user)
-):
-    try:
-        result = await db.execute(
-            select(Venta)
-            .where(Venta.empresa_id == usuario.empresa_id)
-            .options(joinedload(Venta.producto))
-        )
-        ventas = result.scalars().all()
-        return ventas
-    except Exception as e:
-        logging.error(f"Error al listar ventas: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno al listar ventas")
+async def listar_ventas(db: AsyncSession = Depends(get_db)):
+    # TODO: Volver a filtrar por empresa_id y proteger con autenticación en producción
+    result = await db.execute(
+        select(Venta)
+        .where(Venta.empresa_id == 1)
+    )
+    ventas = result.scalars().all()
+    return ventas
 
 @router.get("/{venta_id}", response_model=VentaOut)
 async def obtener_venta(
     venta_id: int,
-    db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(get_current_user)
+    db: AsyncSession = Depends(get_db)
 ):
-    try:
-        result = await db.execute(
-            select(Venta)
-            .where(
-                Venta.id == venta_id,
-                Venta.empresa_id == usuario.empresa_id
-            )
-            .options(joinedload(Venta.producto))
+    # TODO: Volver a filtrar por empresa_id y proteger con autenticación en producción
+    result = await db.execute(
+        select(Venta)
+        .where(
+            Venta.id == venta_id,
+            Venta.empresa_id == 1
         )
-        venta = result.scalar_one_or_none()
-        if not venta:
-            raise HTTPException(status_code=404, detail="Venta no encontrada")
-        return venta
-    except HTTPException:
-        raise
-    except Exception as e:
-        logging.error(f"Error al obtener venta: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno al obtener la venta")
+    )
+    venta = result.scalar_one_or_none()
+    if not venta:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    return venta
 
 # (Opcional: agrega aquí endpoint de actualizar/eliminar venta si lo necesitas en el futuro)

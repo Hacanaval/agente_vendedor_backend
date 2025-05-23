@@ -39,14 +39,10 @@ async def chat(
     - llm: modelo de lenguaje a usar (por ahora solo "openai")
     """
     try:
-        empresa_id = getattr(req, "empresa_id", None)
-        if not empresa_id:
-            raise HTTPException(status_code=400, detail="Debes especificar empresa_id para el chat.")
-
-        # Obtener info de la empresa
-        empresa = await db.get(Empresa, empresa_id)
+        # TODO: Volver a usar empresa_id dinámico y autenticación en multiempresa
+        empresa = await db.get(Empresa, 1)
         if not empresa:
-            raise HTTPException(status_code=404, detail="Empresa no encontrada")
+            raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
 
         # Clasificación automática si no viene tipo
         tipo = req.tipo
@@ -57,7 +53,7 @@ async def chat(
         respuesta = await consultar_rag(
             mensaje=req.mensaje,
             tipo=tipo,
-            empresa_id=empresa_id,
+            empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
             db=db,
             nombre_agente="Agente Vendedor",
             nombre_empresa=empresa.nombre,
@@ -178,14 +174,15 @@ async def chat_imagen(
     descripcion = await procesar_imagen_openai_vision(image_bytes, mensaje, llm=llm)
 
     # 3. Usar la descripción como entrada al pipeline RAG
-    empresa = await db.get(Empresa, empresa_id)
+    # TODO: Volver a usar empresa_id dinámico y autenticación en multiempresa
+    empresa = await db.get(Empresa, 1)
     if not empresa:
-        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+        raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
     try:
         respuesta = await consultar_rag(
             mensaje=descripcion,
             tipo="inventario",
-            empresa_id=empresa_id,
+            empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
             db=db,
             nombre_agente="Agente Vendedor",
             nombre_empresa=empresa.nombre,
@@ -223,18 +220,15 @@ async def chat_texto(
       curl -X POST http://localhost:8000/chat/texto -H "Content-Type: application/json" -d '{"mensaje": "¿Qué productos tienen?", "tono": "formal"}'
     - Puedes forzar el LLM con el campo 'llm'.
     """
-    empresa_id = getattr(req, "empresa_id", None)
-    if not empresa_id:
-        raise HTTPException(status_code=400, detail="Debes especificar empresa_id para el chat.")
-
-    empresa = await db.get(Empresa, empresa_id)
+    # TODO: Volver a usar empresa_id dinámico y autenticación en multiempresa
+    empresa = await db.get(Empresa, 1)
     if not empresa:
-        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+        raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
     try:
         respuesta = await consultar_rag(
             mensaje=req.mensaje,
             tipo="inventario",
-            empresa_id=empresa_id,
+            empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
             db=db,
             nombre_agente="Agente Vendedor",
             nombre_empresa=empresa.nombre,
@@ -279,14 +273,15 @@ async def chat_audio(
     # TODO: Integrar transcripción real (Whisper, Gemini, etc.)
     transcripcion = "[Transcripción simulada: integración futura con Whisper/Gemini]"
     audio_prompt = prompt_audio(transcripcion)
-    empresa = await db.get(Empresa, empresa_id)
+    # TODO: Volver a usar empresa_id dinámico y autenticación en multiempresa
+    empresa = await db.get(Empresa, 1)
     if not empresa:
-        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+        raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
     try:
         respuesta = await consultar_rag(
             mensaje=audio_prompt,
             tipo="contexto",
-            empresa_id=empresa_id,
+            empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
             db=db,
             nombre_agente="Agente Vendedor",
             nombre_empresa=empresa.nombre,
@@ -324,9 +319,10 @@ async def chat_router(
       curl -X POST http://localhost:8000/chat -H "Content-Type: application/json" -d '{"tipo": "texto", "mensaje": "Hola"}'
     - Puedes forzar el tipo y el LLM con los campos 'tipo' y 'llm'.
     """
-    empresa_id = getattr(req, "empresa_id", None)
-    if not empresa_id:
-        raise HTTPException(status_code=400, detail="Debes especificar empresa_id para el chat.")
+    # TODO: Volver a usar empresa_id dinámico y autenticación en multiempresa
+    empresa = await db.get(Empresa, 1)
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
 
     tipo = req.tipo
     if not tipo:
@@ -345,7 +341,7 @@ async def chat_router(
             tono=req.tono,
             instrucciones=req.instrucciones,
             llm=req.llm,
-            empresa_id=empresa_id
+            empresa_id=1  # TODO: Volver a usar empresa_id dinámico en multiempresa
         ), db)
     elif tipo == "imagen":
         # Redirigir a /chat/imagen (solo soporta imagen_url aquí)
@@ -357,7 +353,7 @@ async def chat_router(
             tono=req.tono,
             instrucciones=req.instrucciones,
             llm=req.llm,
-            empresa_id=empresa_id,
+            empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
             db=db
         )
     elif tipo == "audio":
