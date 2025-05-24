@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.empresa import Empresa
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from app.services.rag import consultar_rag
 from pydantic import BaseModel, Field
 import logging
@@ -12,6 +12,9 @@ import tempfile
 import os
 from app.services.llm_client import generar_respuesta
 from app.services.prompts import prompt_vision, prompt_audio
+from app.models.mensaje import Mensaje
+from sqlalchemy import insert, select, or_
+from datetime import datetime
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -116,89 +119,56 @@ async def procesar_imagen_openai_vision(image_bytes: bytes, prompt: str, llm: st
         return "No puedo interpretar la imagen con claridad."
 
 @router.post("/imagen", summary="Procesa una imagen (archivo o URL) y responde usando visión + RAG", response_model=Dict[str, Any])
-async def chat_imagen(
-    request: Request,
-    imagen: Optional[UploadFile] = File(None, description="Imagen a procesar (JPEG/PNG, máx 2MB)"),
-    imagen_url: Optional[str] = Form(None, description="URL pública de la imagen (opcional)"),
-    mensaje: Optional[str] = Form(None, description="Prompt adicional para la imagen (opcional)"),
-    tono: Optional[str] = Form("formal"),
-    instrucciones: Optional[str] = Form(""),
-    llm: Optional[str] = Form("gpt-4-vision-preview"),
-    empresa_id: Optional[int] = Form(None),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Endpoint para procesar imágenes con OpenAI Vision y pipeline RAG.
-    - Acepta imagen como archivo (multipart/form-data) o como URL (campo imagen_url).
-    - Tamaño máximo: 2MB. Tipos permitidos: JPEG, PNG.
-    - Ejemplo de request (archivo):
-      curl -F "imagen=@/ruta/imagen.jpg" -F "mensaje=Describe esto" -F "tono=formal" http://localhost:8000/chat/imagen
-    - Ejemplo de request (URL):
-      curl -X POST -F "imagen_url=https://.../img.png" http://localhost:8000/chat/imagen
-    - Puedes forzar el LLM con el campo 'llm'.
-    - Si el LLM no entiende la imagen, lo indica en la respuesta.
-    """
-    if not empresa_id:
-        raise HTTPException(status_code=400, detail="Debes especificar empresa_id para el chat.")
-
-    # 1. Obtener bytes de la imagen
-    image_bytes = None
-    if imagen is not None:
-        if imagen.content_type not in ALLOWED_IMAGE_TYPES:
-            raise HTTPException(status_code=400, detail="Tipo de imagen no permitido. Solo JPEG o PNG.")
-        imagen.file.seek(0, 2)
-        size_mb = imagen.file.tell() / (1024 * 1024)
-        imagen.file.seek(0)
-        if size_mb > MAX_IMAGE_SIZE_MB:
-            raise HTTPException(status_code=400, detail=f"La imagen supera el tamaño máximo de {MAX_IMAGE_SIZE_MB}MB")
-        image_bytes = await imagen.read()
-    elif imagen_url:
-        # Descargar la imagen
-        async with aiohttp.ClientSession() as session:
-            async with session.get(imagen_url) as resp:
-                if resp.status != 200:
-                    raise HTTPException(status_code=400, detail="No se pudo descargar la imagen desde la URL")
-                content_type = resp.headers.get("Content-Type", "")
-                if content_type not in ALLOWED_IMAGE_TYPES:
-                    raise HTTPException(status_code=400, detail="Tipo de imagen no permitido en la URL. Solo JPEG o PNG.")
-                image_bytes = await resp.read()
-                size_mb = len(image_bytes) / (1024 * 1024)
-                if size_mb > MAX_IMAGE_SIZE_MB:
-                    raise HTTPException(status_code=400, detail=f"La imagen supera el tamaño máximo de {MAX_IMAGE_SIZE_MB}MB")
-    else:
-        raise HTTPException(status_code=400, detail="Debes enviar una imagen como archivo o una imagen_url")
-
-    # 2. Procesar imagen con OpenAI Vision
-    descripcion = await procesar_imagen_openai_vision(image_bytes, mensaje, llm=llm)
-
-    # 3. Usar la descripción como entrada al pipeline RAG
-    # TODO: Volver a usar empresa_id dinámico y autenticación en multiempresa
-    empresa = await db.get(Empresa, 1)
-    if not empresa:
-        raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
+async def chat_imagen(request: Request, imagen: Optional[UploadFile] = File(None), imagen_url: Optional[str] = Form(None), mensaje: Optional[str] = Form(None), tono: Optional[str] = Form("formal"), instrucciones: Optional[str] = Form(""), llm: Optional[str] = Form("gpt-4-vision-preview"), db: AsyncSession = Depends(get_db)):
+    logging.info("Recibida petición en /chat/imagen")
     try:
+        # 1. Obtener bytes de la imagen
+        image_bytes = None
+        if imagen is not None:
+            if imagen.content_type not in ALLOWED_IMAGE_TYPES:
+                raise HTTPException(status_code=400, detail="Tipo de imagen no permitido. Solo JPEG o PNG.")
+            imagen.file.seek(0, 2)
+            size_mb = imagen.file.tell() / (1024 * 1024)
+            imagen.file.seek(0)
+            if size_mb > MAX_IMAGE_SIZE_MB:
+                raise HTTPException(status_code=400, detail=f"La imagen supera el tamaño máximo de {MAX_IMAGE_SIZE_MB}MB")
+            image_bytes = await imagen.read()
+        elif imagen_url:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(imagen_url) as resp:
+                    if resp.status != 200:
+                        raise HTTPException(status_code=400, detail="No se pudo descargar la imagen desde la URL")
+                    content_type = resp.headers.get("Content-Type", "")
+                    if content_type not in ALLOWED_IMAGE_TYPES:
+                        raise HTTPException(status_code=400, detail="Tipo de imagen no permitido en la URL. Solo JPEG o PNG.")
+                    image_bytes = await resp.read()
+                    size_mb = len(image_bytes) / (1024 * 1024)
+                    if size_mb > MAX_IMAGE_SIZE_MB:
+                        raise HTTPException(status_code=400, detail=f"La imagen supera el tamaño máximo de {MAX_IMAGE_SIZE_MB}MB")
+        else:
+            raise HTTPException(status_code=400, detail="Debes enviar una imagen como archivo o una imagen_url")
+        logging.info(f"Imagen recibida en /chat/imagen: {bool(image_bytes)} bytes, mensaje: {mensaje}")
+        descripcion = await procesar_imagen_openai_vision(image_bytes, mensaje, llm=llm)
         respuesta = await consultar_rag(
             mensaje=descripcion,
             tipo="inventario",
-            empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
+            empresa_id=1,
             db=db,
             nombre_agente="Agente Vendedor",
-            nombre_empresa=empresa.nombre,
+            nombre_empresa="Sextinvalle",
             tono=tono,
             instrucciones=instrucciones,
             usuario_id=None,
             llm=llm
         )
+        logging.info(f"Respuesta generada en /chat/imagen: {respuesta}")
+        return {
+            "descripcion_imagen": descripcion,
+            "respuesta_agente": respuesta.get("respuesta", "")
+        }
     except Exception as e:
-        logging.error(f"Error en pipeline RAG tras procesar imagen: {str(e)}")
-        respuesta = {"respuesta": "No se pudo procesar la imagen correctamente.", "contexto": "", "prompt": {}}
-
-    return {
-        "descripcion_imagen": descripcion,
-        "respuesta_agente": respuesta.get("respuesta", "No se pudo generar respuesta."),
-        "contexto": respuesta.get("contexto", ""),
-        "prompt": respuesta.get("prompt", {})
-    }
+        logging.error(f"Error en /chat/imagen: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error interno en /chat/imagen")
 
 # --- Texto ---
 class ChatTextoRequest(BaseModel):
@@ -208,93 +178,120 @@ class ChatTextoRequest(BaseModel):
     llm: Optional[str] = "openai"
 
 @router.post("/texto", summary="Procesa solo texto con LLM de texto", response_model=Dict[str, Any])
-async def chat_texto(
-    req: ChatTextoRequest,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Endpoint para procesar mensajes de texto con LLM de texto.
-    - Ejemplo de request:
-      curl -X POST http://localhost:8000/chat/texto -H "Content-Type: application/json" -d '{"mensaje": "¿Qué productos tienen?", "tono": "formal"}'
-    - Puedes forzar el LLM con el campo 'llm'.
-    """
-    # TODO: Volver a usar empresa_id dinámico y autenticación en multiempresa
-    empresa = await db.get(Empresa, 1)
-    if not empresa:
-        raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
+async def chat_texto(request: Request, db: AsyncSession = Depends(get_db)):
+    logging.info("[chat_texto] Recibida petición en /chat/texto")
+    data = await request.json()
+    logging.info(f"[chat_texto] Payload recibido: {data}")
     try:
+        chat_id = str(data.get("chat_id", "pruebas"))
+        mensaje_usuario = data["mensaje"]
+        # Detectar si hay una venta pendiente de confirmación para este chat
+        result = await db.execute(
+            select(Mensaje).where(
+                Mensaje.chat_id == chat_id,
+                Mensaje.estado_venta == "pendiente"
+            ).order_by(Mensaje.timestamp.desc())
+        )
+        venta_pendiente = result.scalars().first()
+        confirmaciones = ["si", "sí", "confirmo", "ok", "dale", "de acuerdo", "acepto", "listo"]
+        if venta_pendiente and any(c in mensaje_usuario.lower() for c in confirmaciones):
+            # Registrar la venta automáticamente
+            # Aquí deberías extraer producto/cantidad de la venta pendiente (puedes guardar más info en el mensaje o contexto)
+            # Para demo, solo cerramos la venta
+            await db.execute(
+                insert(Mensaje).values(
+                    chat_id=chat_id,
+                    remitente="bot",
+                    mensaje="¡Listo! Pedido registrado. Pronto te contactaremos para coordinar la entrega.",
+                    timestamp=datetime.utcnow(),
+                    estado_venta="cerrada"
+                )
+            )
+            # Actualizar estado de la venta pendiente
+            venta_pendiente.estado_venta = "cerrada"
+            await db.commit()
+            return {"respuesta": "¡Listo! Pedido registrado. Pronto te contactaremos para coordinar la entrega."}
+        # Persistir mensaje de usuario
+        await db.execute(insert(Mensaje).values(
+            chat_id=chat_id,
+            remitente="usuario",
+            mensaje=mensaje_usuario,
+            timestamp=datetime.utcnow(),
+            estado_venta=None
+        ))
         respuesta = await consultar_rag(
-            mensaje=req.mensaje,
+            mensaje=mensaje_usuario,
             tipo="inventario",
-            empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
+            empresa_id=1,
             db=db,
             nombre_agente="Agente Vendedor",
-            nombre_empresa=empresa.nombre,
-            tono=req.tono,
-            instrucciones=req.instrucciones,
+            nombre_empresa="Sextinvalle",
+            tono=data.get("tono", "formal"),
+            instrucciones=data.get("instrucciones", ""),
             usuario_id=None,
-            llm=req.llm
+            llm=data.get("llm", "openai")
         )
+        logging.info(f"[chat_texto] Respuesta de consultar_rag: {respuesta}")
+        logging.info("[chat_texto] Justo antes de return")
+        logging.info(f"[chat_texto] Mensaje del usuario: {mensaje_usuario}")
+        logging.info(f"[chat_texto] Respuesta generada: {respuesta.get('respuesta', '')}")
+        # Si la respuesta contiene una invitación a confirmar, marcamos venta pendiente
+        if any(palabra in respuesta.get("respuesta", "").lower() for palabra in ["¿deseas", "quieres confirmar", "te gustaría agregarlo", "confirmar pedido"]):
+            await db.execute(insert(Mensaje).values(
+                chat_id=chat_id,
+                remitente="bot",
+                mensaje=respuesta.get("respuesta", ""),
+                timestamp=datetime.utcnow(),
+                estado_venta="pendiente"
+            ))
+        else:
+            await db.execute(insert(Mensaje).values(
+                chat_id=chat_id,
+                remitente="bot",
+                mensaje=respuesta.get("respuesta", ""),
+                timestamp=datetime.utcnow(),
+                estado_venta=None
+            ))
+        await db.commit()
+        return {"respuesta": respuesta.get("respuesta", "")}
     except Exception as e:
-        logging.error(f"Error en pipeline RAG texto: {str(e)}")
-        respuesta = {"respuesta": "No se pudo procesar el mensaje de texto.", "contexto": "", "prompt": {}}
-    return respuesta
+        logging.error(f"[chat_texto] Error en /chat/texto: {str(e)}")
+        return {"respuesta": "[Respuesta dummy por error interno]"}
 
 # --- Audio ---
 from fastapi import UploadFile
 
 @router.post("/audio", summary="Procesa audio (stub/mock)", response_model=Dict[str, Any])
-async def chat_audio(
-    audio: UploadFile = File(..., description="Archivo de audio (máx 10MB, formatos soportados: mp3, wav)"),
-    tono: Optional[str] = Form("formal"),
-    instrucciones: Optional[str] = Form(""),
-    llm: Optional[str] = Form("openai-whisper"),
-    empresa_id: Optional[int] = Form(None),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Endpoint para procesar audio (stub/mock, integración futura con Whisper/Gemini).
-    - Ejemplo de request:
-      curl -F "audio=@/ruta/audio.mp3" http://localhost:8000/chat/audio
-    - Puedes forzar el LLM/transcriptor con el campo 'llm'.
-    - Tamaño máximo recomendado: 10MB.
-    """
-    if not empresa_id:
-        raise HTTPException(status_code=400, detail="Debes especificar empresa_id para el chat.")
-
-    # Validar tipo y tamaño
-    audio.file.seek(0, 2)
-    size_mb = audio.file.tell() / (1024 * 1024)
-    audio.file.seek(0)
-    if size_mb > 10:
-        raise HTTPException(status_code=400, detail="El audio supera el tamaño máximo de 10MB")
-    # TODO: Integrar transcripción real (Whisper, Gemini, etc.)
-    transcripcion = "[Transcripción simulada: integración futura con Whisper/Gemini]"
-    audio_prompt = prompt_audio(transcripcion)
-    # TODO: Volver a usar empresa_id dinámico y autenticación en multiempresa
-    empresa = await db.get(Empresa, 1)
-    if not empresa:
-        raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
+async def chat_audio(audio: UploadFile = File(...), tono: Optional[str] = Form("formal"), instrucciones: Optional[str] = Form(""), llm: Optional[str] = Form("openai-whisper"), db: AsyncSession = Depends(get_db)):
+    logging.info("Recibida petición en /chat/audio")
     try:
+        audio.file.seek(0, 2)
+        size_mb = audio.file.tell() / (1024 * 1024)
+        audio.file.seek(0)
+        if size_mb > 10:
+            raise HTTPException(status_code=400, detail="El audio supera el tamaño máximo de 10MB")
+        transcripcion = "[Transcripción simulada: integración futura con Whisper/Gemini]"
+        audio_prompt = prompt_audio(transcripcion)
         respuesta = await consultar_rag(
             mensaje=audio_prompt,
             tipo="contexto",
-            empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
+            empresa_id=1,
             db=db,
             nombre_agente="Agente Vendedor",
-            nombre_empresa=empresa.nombre,
+            nombre_empresa="Sextinvalle",
             tono=tono,
             instrucciones=instrucciones,
             usuario_id=None,
             llm=llm
         )
+        logging.info(f"Respuesta generada en /chat/audio: {respuesta}")
+        return {
+            "transcripcion": transcripcion,
+            "respuesta": respuesta.get("respuesta", "")
+        }
     except Exception as e:
-        logging.error(f"Error en pipeline RAG audio: {str(e)}")
-        respuesta = {"respuesta": "No se pudo procesar el audio.", "contexto": "", "prompt": {}}
-    return {
-        "transcripcion": transcripcion,
-        **respuesta
-    }
+        logging.error(f"Error en /chat/audio: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error interno en /chat/audio")
 
 # --- Smart Router ---
 class ChatSmartRequest(BaseModel):
@@ -359,3 +356,23 @@ async def chat_router(
         return {"respuesta": "Procesamiento de audio por URL no implementado aún."}
     else:
         raise HTTPException(status_code=400, detail="Tipo de input no soportado")
+
+@router.get("/historial/{chat_id}", summary="Historial de mensajes de un chat", response_model=List[dict])
+async def historial_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Devuelve el historial de mensajes de un chat_id (usuario/cliente), ordenados por fecha ascendente.
+    """
+    result = await db.execute(
+        select(Mensaje).where(Mensaje.chat_id == chat_id).order_by(Mensaje.timestamp.asc())
+    )
+    mensajes = result.scalars().all()
+    return [
+        {
+            "id": m.id,
+            "chat_id": m.chat_id,
+            "remitente": m.remitente,
+            "mensaje": m.mensaje,
+            "timestamp": m.timestamp.isoformat()
+        }
+        for m in mensajes
+    ]

@@ -25,6 +25,7 @@ async def generar_respuesta_openai(
     """
     Genera una respuesta usando OpenAI de forma asíncrona, con reintentos y logging robusto.
     """
+    logging.info(f"[generar_respuesta_openai] Entrada: prompt={prompt[:100]}..., system_prompt={system_prompt[:100] if system_prompt else None}")
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY no configurada")
     messages = []
@@ -34,6 +35,7 @@ async def generar_respuesta_openai(
     delay = 1
     for intento in range(1, reintentos + 1):
         try:
+            logging.info(f"[generar_respuesta_openai] Llamando a OpenAI (intento {intento})")
             response = await client.chat.completions.create(
                 model=DEFAULT_MODEL,
                 messages=messages,
@@ -41,9 +43,10 @@ async def generar_respuesta_openai(
                 temperature=temperature,
                 **kwargs
             )
+            logging.info(f"[generar_respuesta_openai] Respuesta recibida de OpenAI (intento {intento})")
             return response.choices[0].message.content.strip()
         except Exception as e:
-            logging.error(f"Error al consultar OpenAI (intento {intento}): {str(e)}")
+            logging.error(f"[generar_respuesta_openai] Error al consultar OpenAI (intento {intento}): {str(e)}")
             if intento == reintentos:
                 raise Exception(f"Error al consultar OpenAI tras {reintentos} intentos: {str(e)}")
             await asyncio.sleep(delay)
@@ -59,8 +62,12 @@ async def generar_respuesta(
     Función principal para generar respuestas usando diferentes LLMs.
     Por ahora solo soporta OpenAI, pero está diseñada para ser extensible.
     """
+    logging.info(f"[generar_respuesta] Entrada: llm={llm}, prompt={prompt[:100]}..., system_prompt={system_prompt[:100] if system_prompt else None}")
     if llm == "openai":
-        return await generar_respuesta_openai(prompt, system_prompt=system_prompt, **kwargs)
+        logging.info("[generar_respuesta] Antes de llamar a generar_respuesta_openai")
+        respuesta = await generar_respuesta_openai(prompt, system_prompt=system_prompt, **kwargs)
+        logging.info(f"[generar_respuesta] Respuesta de generar_respuesta_openai: {respuesta[:200]}...")
+        return respuesta
     # Aquí puedes agregar otros LLMs en el futuro:
     # elif llm == "gemini":
     #     return await generar_respuesta_gemini(prompt, **kwargs)

@@ -40,10 +40,13 @@ async def consultar_rag(
     Returns:
         Dict con respuesta, contexto y prompt usado
     """
+    logging.info(f"[consultar_rag] Entrada: mensaje={mensaje}, tipo={tipo}, empresa_id={empresa_id}, llm={llm}")
     try:
         # 1. Retrieval según tipo
+        logging.info(f"[consultar_rag] Antes de retrieval para tipo={tipo}")
         if tipo == "inventario":
             contexto = await retrieval_inventario(mensaje, empresa_id, db)
+            logging.info(f"[consultar_rag] Contexto inventario obtenido: {contexto[:200]}...")
             system_prompt, user_prompt = prompt_ventas(
                 contexto=contexto,
                 mensaje=mensaje,
@@ -54,6 +57,7 @@ async def consultar_rag(
             )
         elif tipo == "contexto":
             contexto = await retrieval_contexto_empresa(mensaje, empresa_id, db)
+            logging.info(f"[consultar_rag] Contexto empresa obtenido: {contexto[:200]}...")
             system_prompt, user_prompt = prompt_empresa(
                 contexto=contexto,
                 mensaje=mensaje,
@@ -65,13 +69,14 @@ async def consultar_rag(
         else:
             raise ValueError(f"Tipo de consulta no soportado: {tipo}")
 
-        # 2. Generar respuesta usando LLM
+        logging.info(f"[consultar_rag] Antes de llamada al LLM (generar_respuesta)")
         respuesta = await generar_respuesta(
             prompt=user_prompt,
             llm=llm,
             system_prompt=system_prompt,
             **kwargs
         )
+        logging.info(f"[consultar_rag] Respuesta LLM: {respuesta}")
 
         # 3. Registrar log si hay usuario_id
         if usuario_id:
@@ -89,6 +94,7 @@ async def consultar_rag(
                 }
             )
 
+        logging.info(f"[consultar_rag] Justo antes de return")
         return {
             "respuesta": respuesta,
             "contexto": contexto,
@@ -99,7 +105,7 @@ async def consultar_rag(
         }
 
     except Exception as e:
-        logging.error(f"Error en consulta RAG: {str(e)}")
+        logging.error(f"[consultar_rag] Error en consulta RAG: {str(e)}")
         raise
 
 async def retrieval_inventario(mensaje: str, empresa_id: int, db):

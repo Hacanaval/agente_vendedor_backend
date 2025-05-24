@@ -12,8 +12,6 @@ class UsuarioRegister(BaseModel):
     email: EmailStr
     telefono: str
     password: constr(min_length=6)
-    empresa_id: Optional[int] = None
-    empresa: Optional[EmpresaCreate] = None
 
 class UsuarioLogin(BaseModel):
     email: EmailStr
@@ -28,8 +26,6 @@ class UsuarioOut(BaseModel):
     nombre: str
     email: EmailStr
     telefono: str
-    rol: str
-    empresa_id: int
 
     class Config:
         orm_mode = True 

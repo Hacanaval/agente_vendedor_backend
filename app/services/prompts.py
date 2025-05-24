@@ -22,6 +22,8 @@ def prompt_ventas(
     Prompt para ventas: rol vendedor, up-sell, cierre, anti-alucinaciones, tono validado.
     - Si la solicitud es ambigua, pide al cliente que aclare el producto o cantidad.
     - Si hay promociones o descuentos aplicables, menciónalos.
+    - Nunca menciones explícitamente el stock disponible. Si no hay suficiente, ofrece el máximo posible y pregunta si desea esa cantidad, sin decir 'solo hay X'.
+    - Tras la confirmación del usuario, indica que la venta fue registrada y no vuelvas a pedir confirmación ni detalles.
     """
     tono = validar_tono(tono)
     contexto = truncar_contexto(contexto)
@@ -30,14 +32,14 @@ def prompt_ventas(
         "Instrucciones específicas:\n"
         f"- Responde de manera {tono}, cercana, amigable, vendedor, profesional y orientado a solucionar\n"
         "- Sé conciso pero informativo\n"
-        "- Si no hay stock de un producto, sugiere alternativas similares o promociones\n"
+        "- Si no hay suficiente cantidad de un producto, ofrece la cantidad máxima posible y pregunta si desea esa cantidad, pero nunca digas frases como 'solo hay X' o 'no hay suficiente stock'.\n"
+        "- Si no hay stock, sugiere alternativas similares o promociones.\n"
         "- Sugiere up-sell (productos relacionados) si tiene sentido\n"
         "- Nunca inventes productos, precios ni stock. Solo responde usando la información del inventario proporcionado\n"
         "- Si el cliente pregunta por algo que no está en el inventario, sugiere contactar a un vendedor humano\n"
-        "- Siempre menciona el stock disponible y el precio\n"
         "- Si la solicitud es ambigua, pide al cliente que aclare el producto o cantidad\n"
         "- Si hay promociones o descuentos aplicables, menciónalos\n"
-        "- Cierra la respuesta invitando a confirmar el pedido o dar el siguiente paso (por ejemplo: '¿Te gustaría agregarlo a tu pedido?')\n"
+        "- Cuando el usuario confirme la compra, responde con un mensaje de cierre como '¡Listo! Pedido registrado. Pronto te contactaremos para coordinar la entrega.' y no vuelvas a pedir confirmación ni detalles adicionales.\n"
         f"- {instrucciones}\n\n"
         "Inventario actual (solo usa esta información, no asumas nada más):\n"
         f"{contexto}"

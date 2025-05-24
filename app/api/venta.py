@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
@@ -9,6 +9,7 @@ from app.schemas.venta import VentaCreate, VentaOut
 from app.services.logs import registrar_log
 from typing import List
 import logging
+from app.models.mensaje import Mensaje
 
 router = APIRouter(
     prefix="/ventas",
@@ -18,6 +19,7 @@ router = APIRouter(
 @router.post("/", response_model=VentaOut)
 async def crear_venta(
     data: VentaCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     # TODO: Volver a proteger con autenticación y multiempresa en producción
@@ -38,12 +40,15 @@ async def crear_venta(
         await db.flush()
 
         # 3. Registrar venta
+        body = await request.json()
+        chat_id = body.get("chat_id") if isinstance(body, dict) else None
         venta = Venta(
             empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
             producto_id=producto.id,
-            usuario_id=None,  # TODO: Volver a asociar usuario en multiempresa
+            usuario_id=None,  # Fijo en None para modo sin usuarios
             cantidad=data.cantidad,
-            total=producto.precio * data.cantidad
+            total=producto.precio * data.cantidad,
+            chat_id=chat_id
         )
         db.add(venta)
         await db.flush()
@@ -87,5 +92,26 @@ async def obtener_venta(
     if not venta:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
     return venta
+
+@router.get("/historial/{chat_id}", summary="Historial de ventas de un chat", response_model=List[dict])
+async def historial_ventas_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Devuelve el historial de ventas asociadas a un chat_id (usuario/cliente), ordenadas por fecha descendente.
+    """
+    # TODO: Filtrar por empresa_id en multiempresa
+    result = await db.execute(
+        select(Venta).where(Venta.chat_id == chat_id).order_by(Venta.fecha.desc())
+    )
+    ventas = result.scalars().all()
+    return [
+        {
+            "id": v.id,
+            "chat_id": v.chat_id,
+            "productos": v.productos,  # Asume que productos es un campo serializable
+            "total": v.total,
+            "fecha": v.fecha.isoformat()
+        }
+        for v in ventas
+    ]
 
 # (Opcional: agrega aquí endpoint de actualizar/eliminar venta si lo necesitas en el futuro)

@@ -8,7 +8,6 @@ class VentaOut(BaseModel):
     id: int
     empresa_id: int
     producto_id: int
-    usuario_id: int
     cantidad: int
     total: float
 

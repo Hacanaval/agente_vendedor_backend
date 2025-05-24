@@ -14,6 +14,8 @@ class Venta(Base):
     total = Column(Float, nullable=False)
     estado = Column(String(50), nullable=True)   # Opcional, puedes ajustar a False si siempre tiene valor
     detalle = Column(JSON, nullable=True)         # Opcional, puedes ajustar a False si siempre tiene valor
+    chat_id = Column(String, index=True, nullable=True)  # Nuevo campo para asociar venta a chat/usuario
+    # TODO: multiempresa y autenticación
 
     empresa = relationship("Empresa", backref="ventas")
     usuario = relationship("Usuario", backref="ventas")

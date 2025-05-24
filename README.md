@@ -1,42 +1,124 @@
 # Agente Vendedor SaaS Backend
 
-Backend profesional y modular para un Agente Vendedor de WhatsApp dirigido a PYMES. Permite gestionar inventario, ventas, clientes y consultas inteligentes vía chat, integrando RAG (Retrieval-Augmented Generation) con LLMs (OpenAI por defecto) y arquitectura multi-tenant.
+Backend profesional, modular y multi-tenant para un Agente Vendedor conversacional orientado a PYMES. Permite gestionar inventario, ventas, clientes y consultas inteligentes vía chat, integrando RAG (Retrieval-Augmented Generation) con LLMs (OpenAI por defecto) y arquitectura lista para multiempresa.
+
+---
 
 ## 🚀 Objetivo
-Desarrollar una plataforma SaaS robusta para que pequeñas y medianas empresas gestionen su inventario, ventas y atención al cliente vía WhatsApp, con soporte de IA conversacional y administración multi-empresa.
+Desarrollar una plataforma SaaS robusta para que pequeñas y medianas empresas gestionen su inventario, ventas y atención al cliente vía chat (WhatsApp, Telegram, web), con soporte de IA conversacional, administración multiempresa y registro completo de la experiencia de usuario.
 
-## ✅ Estado actual
-- Arquitectura multi-tenant lista para escalar y robusta (nunca se mezclan datos de empresas)
-- Modelos de datos completos (empresa, usuario, producto, venta, logs, etc.)
-- Autenticación JWT, roles (admin, vendedor, observador), endpoints protegidos
-- CRUD de productos y ventas, validaciones estrictas
-- Carga y reemplazo masivo de inventario vía CSV (transacción atómica, validaciones, límite 2MB/1000 productos)
-- Sistema de logs/auditoría extensible y métricas de uso
-- Pipeline RAG modular: retrieval semántico (FAISS), prompts desacoplados, LLM pluggable
-- Endpoint `/chat` funcional para consultas inteligentes
-- Endpoints de métricas y administración para pruebas y control
-- Cache de embeddings y reintentos automáticos en LLM y retrieval
+---
 
 ## 🏗️ Arquitectura y tecnologías
 - **FastAPI** (backend async, modular, tipado)
 - **PostgreSQL** + **SQLAlchemy async** (ORM, relaciones, transacciones)
 - **FAISS** (vector DB local, retrieval semántico)
 - **OpenAI** (embeddings y LLM, arquitectura pluggable para otros modelos)
-- **JWT** (autenticación y roles)
+- **JWT** (autenticación y roles, desactivado en modo MVP)
 - **Pandas** (procesamiento de CSV)
+- **python-telegram-bot** (integración Telegram)
 - **Docker-ready** (estructura preparada para contenerización)
+
+---
 
 ## 📂 Estructura principal
 ```
 app/
-  api/           # Endpoints FastAPI
-  models/        # Modelos SQLAlchemy
+  api/           # Endpoints FastAPI (chat, ventas, productos, logs, etc.)
+  models/        # Modelos SQLAlchemy (empresa, usuario, producto, venta, mensaje, etc.)
   services/      # Lógica de negocio, RAG, LLM, prompts, logs
   core/          # Configuración, base de datos
   schemas/       # Pydantic
+  integrations/  # Bots y canales externos (ej: Telegram)
+alembic/          # Migraciones de base de datos
 ```
 
-## ⚙️ Instalación y despliegue local
+---
+
+## ✅ Estado actual y módulos implementados
+- **Multi-tenant listo**: arquitectura preparada para múltiples empresas (filtros por empresa_id, TODOs para reactivar seguridad)
+- **Modelos completos**: empresa, usuario, producto, venta, mensaje (persistencia de conversación), logs, etc.
+- **Autenticación JWT y roles**: implementado pero desactivado en modo MVP/pruebas
+- **CRUD de productos y ventas**: validaciones estrictas, carga masiva por CSV
+- **Logs/auditoría y métricas**: endpoints para monitoreo y administración
+- **Pipeline RAG modular**: retrieval semántico (FAISS), prompts desacoplados, LLM pluggable
+- **Persistencia de conversación**: cada mensaje de usuario y bot se guarda con chat_id, remitente, mensaje, timestamp y estado de venta
+- **Registro automático de ventas**: detección de confirmación, registro en base de datos, cierre de ciclo conversacional
+- **Integración Telegram**: bot funcional, logs de entrada/salida, soporte para texto, imagen y audio
+- **Endpoints de historial**: consulta de mensajes y ventas por chat_id para frontend o auditoría
+- **Cache de embeddings y reintentos automáticos**
+- **Validaciones robustas y manejo de errores**
+
+---
+
+## 🔄 Flujo conversacional y persistencia
+- Cada mensaje enviado y recibido (usuario/bot) se guarda en la tabla `mensaje` con `chat_id`, `remitente`, `mensaje`, `timestamp` y `estado_venta`.
+- El backend detecta automáticamente confirmaciones de venta ("sí", "confirmo", "ok", etc.) y registra la venta en la tabla `venta` asociada al `chat_id`.
+- El ciclo de venta se cierra con un mensaje de cierre y no se vuelve a pedir confirmación.
+- Todo el historial de conversación y ventas puede ser consultado por el frontend para reconstruir la experiencia del usuario.
+
+---
+
+## 🧑‍💻 Endpoints principales
+
+### Chat y conversación
+- `POST /chat/texto` — Procesa mensajes de texto, integra RAG y LLM, guarda cada mensaje y gestiona el flujo de venta.
+- `GET /chat/historial/{chat_id}` — Devuelve el historial completo de mensajes de un usuario/chat.
+
+### Ventas
+- `POST /ventas/` — Registra una venta (usado automáticamente al confirmar en el chat).
+- `GET /ventas/historial/{chat_id}` — Devuelve el historial de ventas de un usuario/chat.
+
+### Productos
+- `POST /productos/reemplazar_csv` — Carga masiva de inventario vía CSV (validaciones de tamaño y formato).
+- `GET /productos/` — Lista todos los productos activos y con stock.
+
+### Logs y métricas
+- `GET /logs/` — Consulta logs/auditoría.
+- `GET /logs/metrics/uso` — Métricas de uso (consultas, ventas, etc.).
+- `POST /logs/admin/reset_empresa` — Borra todos los datos de la empresa actual (solo admin).
+- `POST /logs/admin/reset_global` — Borra todos los datos globales (solo superadmin).
+
+---
+
+## 🤖 Integración con Telegram
+- Bot funcional usando `python-telegram-bot`.
+- Soporta texto, imágenes y audio.
+- Cada mensaje del usuario y la respuesta del bot se loguean y persisten.
+- El bot usa un `chat_id` único por usuario para asociar la conversación y las ventas.
+- El bot puede funcionar 24/7 con un token fijo y sin login manual.
+
+---
+
+## 📝 Ejemplo de flujo conversacional
+1. **Usuario:** "Quiero comprar 10 martillos."
+2. **Bot:** "Puedo ofrecerte 7 martillos. ¿Deseas llevar esa cantidad?"
+3. **Usuario:** "Sí."
+4. **Bot:** "¡Listo! Pedido registrado. Pronto te contactaremos para coordinar la entrega."
+5. **(El historial y la venta quedan registrados y pueden ser consultados por el frontend)**
+
+---
+
+## 📝 Personalización y extensibilidad
+- **Prompts**: Edita los prompts en `app/services/prompts.py` para cambiar el tono, reglas anti-alucinación, cierre de venta, etc.
+- **LLM**: Cambia el modelo de lenguaje (OpenAI, Gemini, Cohere, local, etc.) en la configuración.
+- **Retrieval**: Arquitectura lista para migrar de FAISS a Pinecone u otros.
+- **Multi-tenant**: TODOs y comentarios en el código para reactivar seguridad y multiempresa.
+- **Integración de canales**: Listo para WhatsApp, Telegram, web y otros.
+
+---
+
+## ⚠️ Seguridad y advertencias
+- **Modo MVP/pruebas:**
+  - No requiere autenticación JWT ni login en ningún endpoint.
+  - No soporta multiempresa: todos los endpoints trabajan únicamente con la empresa de id=1.
+  - Cualquier usuario o bot puede acceder y modificar datos sin restricciones.
+- **¡NO USAR ESTE MODO EN PRODUCCIÓN!**
+- Para pasar a producción: reactiva autenticación, roles y filtros por empresa_id siguiendo los TODOs y comentarios en el código.
+
+---
+
+## 🛠️ Instalación y despliegue local
 1. Clona el repo:
    ```bash
    git clone https://github.com/Hacanaval/agente_vendedor_backend.git
@@ -57,84 +139,35 @@ app/
    DATABASE_URL=postgresql+asyncpg://usuario:password@localhost:5432/tu_db
    # ...otros parámetros opcionales
    ```
-5. Crea las tablas:
+5. Crea las tablas y aplica migraciones:
    ```bash
    python create_tables.py
+   alembic upgrade head
    ```
 6. Ejecuta el servidor:
    ```bash
    uvicorn app.main:app --reload
    ```
 
-## 🧑‍💻 Ejemplo de uso: endpoint `/chat`
-Consulta inteligente de inventario o contexto empresarial:
+---
 
-```bash
-curl -X POST "http://localhost:8000/chat" \
-  -H "Authorization: Bearer TU_TOKEN_JWT" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "mensaje": "¿Qué laptops tienen en stock?",
-    "tipo": "inventario",
-    "tono": "formal",
-    "instrucciones": "Responde siempre en español.",
-    "llm": "openai"
-  }'
-```
+## 📈 Consultas y administración
+- Consulta historial de mensajes: `GET /chat/historial/{chat_id}`
+- Consulta historial de ventas: `GET /ventas/historial/{chat_id}`
+- Consulta métricas de uso: `GET /logs/metrics/uso`
+- Reset de empresa o global: `POST /logs/admin/reset_empresa` y `POST /logs/admin/reset_global`
 
-## 📊 Endpoints de métricas y administración
+---
 
-- **Métricas de uso (solo admin):**
-  ```bash
-  curl -X GET "http://localhost:8000/logs/metrics/uso" -H "Authorization: Bearer TU_TOKEN_JWT"
-  # Parámetros opcionales: usuario_id, fecha_inicio, fecha_fin
-  ```
-- **Reset de empresa (solo admin):**
-  ```bash
-  curl -X POST "http://localhost:8000/logs/admin/reset_empresa" -H "Authorization: Bearer TU_TOKEN_JWT"
-  ```
-- **Reset global (solo superadmin):**
-  ```bash
-  curl -X POST "http://localhost:8000/logs/admin/reset_global" -H "Authorization: Bearer TU_TOKEN_JWT"
-  # Solo emails: hacanaval@hotmail.com, hugocanaval34@gmail.com
-  ```
-
-## 📝 Personalización de prompts y pipeline RAG
-- Todos los prompts (ventas, empresa, clasificación) están en `app/services/prompts.py`.
-- Puedes editar fácilmente el tono, instrucciones, ejemplos y reglas anti-alucinaciones.
-- Para cambiar el comportamiento del agente, solo ajusta los prompts en ese archivo.
-- El pipeline RAG está en `app/services/rag.py` y es modular: puedes cambiar retrieval, prompts o LLM con mínima edición.
-
-## 🔒 Seguridad y robustez multi-tenant
-- Todos los endpoints y queries filtran por empresa_id del usuario autenticado.
-- No es posible acceder a datos de otra empresa.
-- Endpoints críticos protegidos por rol y JWT.
-- Variables sensibles solo en `.env`.
-
-## ⚠️ Límite de carga de CSV
-- El endpoint `/productos/reemplazar_csv` acepta archivos de hasta 2MB y máximo 1000 productos por carga.
-- Si se excede, devuelve error 400.
-
-## 🧠 Mejoras recientes
-- Cache de embeddings para evitar recomputos y reducir costos.
-- Reintentos automáticos y logs en servicios LLM y retrieval.
-- Manejo robusto de errores y validaciones en todos los endpoints.
-- Endpoints de administración para pruebas y limpieza de datos.
-
-## 🔄 Extensibilidad
-- **LLM pluggable**: Cambia de OpenAI a Gemini, Cohere, etc. editando una línea de config
-- **Retrieval**: Arquitectura lista para migrar de FAISS a Pinecone u otros
-- **Prompts**: Separados y personalizables por empresa, canal, etc.
-- **Logs**: Sistema de auditoría extensible y filtrable
-- **Multi-tenant**: Todo endpoint y modelo validado por empresa
-
-## 📝 Próximos pasos
+## 📝 Próximos pasos sugeridos
 - Integración WhatsApp/Telegram (webhook, sesión, multimedia)
 - Frontend administrativo y dashboard
 - Reportes, analítica y exportación de datos
 - Dockerización y CI/CD
 - Seguridad avanzada (2FA, cifrado, retención de logs)
 - Escalabilidad: migración a LangGraph, Pinecone, balanceo de carga
+
+---
 
 ## ⚠️ NOTA IMPORTANTE / IMPORTANT NOTE
 

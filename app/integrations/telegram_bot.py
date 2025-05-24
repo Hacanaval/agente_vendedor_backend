@@ -18,26 +18,27 @@ BACKEND_URL = "http://localhost:8001"  # Cambia si tu backend está en otro host
 EMPRESA_ID = 4  # Cambia este valor por el id real de la empresa para pruebas
 
 async def consultar_backend_texto(mensaje: str, user_id: int) -> str:
-    async with httpx.AsyncClient() as client:
+    url = f"{BACKEND_URL}/chat/texto"
+    payload = {"mensaje": mensaje}
+    print(f"[DEBUG] Enviando a backend: {payload} a {url}")
+    async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(
-            f"{BACKEND_URL}/chat/texto",
-            json={"mensaje": mensaje, "tono": "amigable", "llm": "openai", "empresa_id": EMPRESA_ID},
-            headers={"Authorization": f"Bearer {BOT_TOKEN_FIXED}"}
+            url,
+            json=payload
         )
         if response.status_code == 200:
             return response.json().get("respuesta", "No se pudo obtener respuesta.")
         return "Error al consultar el agente."
 
 async def consultar_backend_imagen(image_path: str, user_id: int) -> str:
-    async with httpx.AsyncClient() as client:
+    url = f"{BACKEND_URL}/chat/imagen"
+    print(f"[DEBUG] Enviando imagen a backend: {image_path} a {url}")
+    async with httpx.AsyncClient(timeout=20.0) as client:
         with open(image_path, "rb") as f:
             files = {"imagen": (os.path.basename(image_path), f, "image/jpeg")}
-            data = {"empresa_id": str(EMPRESA_ID)}
             response = await client.post(
-                f"{BACKEND_URL}/chat/imagen",
-                files=files,
-                data=data,
-                headers={"Authorization": f"Bearer {BOT_TOKEN_FIXED}"}
+                url,
+                files=files
             )
         if response.status_code == 200:
             data = response.json()
@@ -45,15 +46,14 @@ async def consultar_backend_imagen(image_path: str, user_id: int) -> str:
         return "Error al procesar la imagen."
 
 async def consultar_backend_audio(audio_path: str, user_id: int) -> str:
-    async with httpx.AsyncClient() as client:
+    url = f"{BACKEND_URL}/chat/audio"
+    print(f"[DEBUG] Enviando audio a backend: {audio_path} a {url}")
+    async with httpx.AsyncClient(timeout=20.0) as client:
         with open(audio_path, "rb") as f:
             files = {"audio": (os.path.basename(audio_path), f, "audio/mpeg")}
-            data = {"empresa_id": str(EMPRESA_ID)}
             response = await client.post(
-                f"{BACKEND_URL}/chat/audio",
-                files=files,
-                data=data,
-                headers={"Authorization": f"Bearer {BOT_TOKEN_FIXED}"}
+                url,
+                files=files
             )
         if response.status_code == 200:
             data = response.json()
@@ -63,28 +63,35 @@ async def consultar_backend_audio(audio_path: str, user_id: int) -> str:
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     user_id = update.message.from_user.id
+    print(f"[BOT] Mensaje recibido de usuario {user_id}: {user_message}")
     respuesta = await consultar_backend_texto(user_message, user_id)
+    print(f"[BOT] Respuesta a enviar a usuario {user_id}: {respuesta}")
     await update.message.reply_text(respuesta)
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     photo = update.message.photo[-1]  # Highest resolution
+    print(f"[BOT] Imagen recibida de usuario {user_id}")
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tf:
         file = await context.bot.get_file(photo.file_id)
         await file.download_to_drive(tf.name)
         respuesta = await consultar_backend_imagen(tf.name, user_id)
+    print(f"[BOT] Respuesta a enviar a usuario {user_id} (imagen): {respuesta}")
     await update.message.reply_text(respuesta)
 
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     audio = update.message.voice or update.message.audio
     if not audio:
+        print(f"[BOT] Audio inválido recibido de usuario {user_id}")
         await update.message.reply_text("No se detectó audio válido.")
         return
+    print(f"[BOT] Audio recibido de usuario {user_id}")
     with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tf:
         file = await context.bot.get_file(audio.file_id)
         await file.download_to_drive(tf.name)
         respuesta = await consultar_backend_audio(tf.name, user_id)
+    print(f"[BOT] Respuesta a enviar a usuario {user_id} (audio): {respuesta}")
     await update.message.reply_text(respuesta)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):

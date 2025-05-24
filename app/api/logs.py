@@ -15,7 +15,6 @@ router = APIRouter(prefix="/logs", tags=["logs"])
 @router.get("/", response_model=List[dict])
 async def listar_logs(
     modelo: Optional[str] = Query(None),
-    usuario_id: Optional[int] = Query(None),
     accion: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -23,19 +22,15 @@ async def listar_logs(
         query = select(Logs).where(Logs.empresa_id == 1)  # TODO: Volver a multiempresa en producción
         if modelo:
             query = query.where(Logs.modelo == modelo)
-        if usuario_id:
-            query = query.where(Logs.usuario_id == usuario_id)
         if accion:
             query = query.where(Logs.accion == accion)
-        # Opcional: limitar número de logs devueltos
-        # query = query.limit(100)
         result = await db.execute(query.order_by(Logs.fecha.desc()))
         logs = result.scalars().all()
         return [
             {
                 "id": log.id,
                 "empresa_id": log.empresa_id,
-                "usuario_id": log.usuario_id,
+                "usuario_id": getattr(log, "usuario_id", None),
                 "modelo": log.modelo,
                 "accion": log.accion,
                 "detalle": log.detalle,
@@ -49,20 +44,16 @@ async def listar_logs(
 
 @router.get("/metrics/uso", tags=["metrics"])
 async def metricas_uso(
-    usuario_id: Optional[int] = Query(None),
     fecha_inicio: Optional[datetime] = Query(None),
     fecha_fin: Optional[datetime] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Devuelve métricas de uso (consultas de chat y ventas) por empresa y usuario.
-    Solo accesible para usuarios admin de la empresa.
+    Devuelve métricas de uso (consultas de chat y ventas) por empresa.
     """
     # TODO: Volver a proteger por rol en producción
     try:
         filtros = [Logs.empresa_id == 1]
-        if usuario_id:
-            filtros.append(Logs.usuario_id == usuario_id)
         if fecha_inicio:
             filtros.append(Logs.fecha >= fecha_inicio)
         if fecha_fin:
@@ -85,7 +76,6 @@ async def metricas_uso(
         total_ventas = result_ventas.scalar() or 0
         return {
             "empresa_id": 1,
-            "usuario_id": usuario_id,
             "total_consultas_chat": total_chat,
             "total_ventas": total_ventas,
             "fecha_inicio": fecha_inicio,

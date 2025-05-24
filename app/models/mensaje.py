@@ -2,6 +2,10 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
+from sqlalchemy.ext.declarative import declarative_base
+from datetime import datetime
+
+Base = declarative_base()
 
 class Mensaje(Base):
     __tablename__ = "mensaje"
@@ -18,7 +22,10 @@ class Mensaje(Base):
     categoria = Column(String(100), nullable=True)
     tags = Column(String(255), nullable=True)  # separado por comas
     vector_id = Column(String(100), nullable=True)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    chat_id = Column(String, index=True, nullable=False)
+    remitente = Column(String, nullable=False)  # 'usuario' o 'bot'
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    estado_venta = Column(String(20), nullable=True)  # 'pendiente', 'confirmada', 'cerrada', etc.
 
     empresa = relationship("Empresa", backref="mensajes")
     cliente_final = relationship("ClienteFinal", backref="mensajes")
