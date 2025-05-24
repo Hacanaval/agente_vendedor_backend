@@ -3,8 +3,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.core.database import get_db
 from app.models.producto import Producto
-from app.api.auth import get_current_user
-from app.models.usuario import Usuario
 from app.schemas.producto import ProductoCreate, ProductoOut
 from typing import List
 from app.services.producto_csv import parse_csv_productos

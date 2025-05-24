@@ -6,8 +6,6 @@ from app.core.database import get_db
 from app.models.venta import Venta
 from app.models.producto import Producto
 from app.schemas.venta import VentaCreate, VentaOut
-from app.api.auth import get_current_user
-from app.models.usuario import Usuario
 from app.services.logs import registrar_log
 from typing import List
 import logging
