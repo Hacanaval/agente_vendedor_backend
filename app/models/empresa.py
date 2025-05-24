@@ -1,12 +1,11 @@
-from sqlalchemy import Column, Integer, String, DateTime
-from sqlalchemy.sql import func
-from app.core.database import Base
+from sqlalchemy import Column, Integer, String
+from sqlalchemy.ext.declarative import declarative_base
+
+Base = declarative_base()
 
 class Empresa(Base):
     __tablename__ = "empresa"
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String(255), nullable=False)
-    email = Column(String(255), nullable=False, unique=True)
-    telefono = Column(String(50), nullable=False)
-    logo_url = Column(String(255), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False) 
+    descripcion = Column(String(1000), nullable=True)
+    # TODO: Restaurar relaciones multiempresa en producción 

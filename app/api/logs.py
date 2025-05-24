@@ -19,7 +19,7 @@ async def listar_logs(
     db: AsyncSession = Depends(get_db)
 ):
     try:
-        query = select(Logs).where(Logs.empresa_id == 1)  # TODO: Volver a multiempresa en producción
+        query = select(Logs)
         if modelo:
             query = query.where(Logs.modelo == modelo)
         if accion:
@@ -29,8 +29,6 @@ async def listar_logs(
         return [
             {
                 "id": log.id,
-                "empresa_id": log.empresa_id,
-                "usuario_id": getattr(log, "usuario_id", None),
                 "modelo": log.modelo,
                 "accion": log.accion,
                 "detalle": log.detalle,
@@ -49,11 +47,11 @@ async def metricas_uso(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Devuelve métricas de uso (consultas de chat y ventas) por empresa.
+    Devuelve métricas de uso (consultas de chat y ventas).
     """
-    # TODO: Volver a proteger por rol en producción
+    # TODO: Volver a proteger por rol y multiempresa en producción
     try:
-        filtros = [Logs.empresa_id == 1]
+        filtros = []
         if fecha_inicio:
             filtros.append(Logs.fecha >= fecha_inicio)
         if fecha_fin:
@@ -75,7 +73,6 @@ async def metricas_uso(
         result_ventas = await db.execute(query_ventas)
         total_ventas = result_ventas.scalar() or 0
         return {
-            "empresa_id": 1,
             "total_consultas_chat": total_chat,
             "total_ventas": total_ventas,
             "fecha_inicio": fecha_inicio,

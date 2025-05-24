@@ -17,30 +17,13 @@ async def consultar_rag(
     nombre_empresa: str = "Empresa",
     tono: str = "formal",
     instrucciones: str = "",
-    usuario_id: Optional[int] = None,
+    usuario_id: int = None,
     llm: str = "openai",
     **kwargs
-) -> Dict[str, Any]:
+) -> dict:
     """
-    Consulta RAG: recupera contexto relevante y genera respuesta usando LLM.
-    
-    Args:
-        mensaje: Pregunta del usuario
-        tipo: "inventario" o "contexto"
-        empresa_id: ID de la empresa
-        db: Sesión de base de datos
-        nombre_agente: Nombre del agente AI
-        nombre_empresa: Nombre de la empresa
-        tono: Tono de la respuesta ("formal", "informal", etc)
-        instrucciones: Instrucciones adicionales para el LLM
-        usuario_id: ID del usuario (opcional, para logs)
-        llm: LLM a usar ("openai" por defecto)
-        **kwargs: Parámetros adicionales para el LLM
-    
-    Returns:
-        Dict con respuesta, contexto y prompt usado
+    Pipeline RAG: retrieval, generación y respuesta.
     """
-    logging.info(f"[consultar_rag] Entrada: mensaje={mensaje}, tipo={tipo}, empresa_id={empresa_id}, llm={llm}")
     try:
         # 1. Retrieval según tipo
         logging.info(f"[consultar_rag] Antes de retrieval para tipo={tipo}")
@@ -78,23 +61,7 @@ async def consultar_rag(
         )
         logging.info(f"[consultar_rag] Respuesta LLM: {respuesta}")
 
-        # 3. Registrar log si hay usuario_id
-        if usuario_id:
-            await registrar_log(
-                db=db,
-                empresa_id=empresa_id,
-                usuario_id=usuario_id,
-                modelo="chat",
-                accion="consulta_rag",
-                detalle={
-                    "tipo": tipo,
-                    "mensaje": mensaje,
-                    "respuesta": respuesta,
-                    "contexto": contexto[:500] + "..." if len(contexto) > 500 else contexto
-                }
-            )
-
-        logging.info(f"[consultar_rag] Justo antes de return")
+        # TODO: Restaurar logs y multiempresa en producción
         return {
             "respuesta": respuesta,
             "contexto": contexto,
@@ -103,7 +70,6 @@ async def consultar_rag(
                 "user": user_prompt
             }
         }
-
     except Exception as e:
         logging.error(f"[consultar_rag] Error en consulta RAG: {str(e)}")
         raise

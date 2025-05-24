@@ -16,6 +16,7 @@ from app.models.mensaje import Mensaje
 from sqlalchemy import insert, select, or_
 from datetime import datetime
 import openai
+from openai import AsyncOpenAI
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -42,9 +43,10 @@ async def chat(
     """
     try:
         # TODO: Volver a usar empresa_id dinámico y autenticación en multiempresa
-        empresa = await db.get(Empresa, 1)
-        if not empresa:
-            raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
+        # empresa = await db.get(Empresa, 1)
+        # if not empresa:
+        #     raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
+        nombre_empresa = "Empresa Demo"
 
         # Clasificación automática si no viene tipo
         tipo = req.tipo
@@ -58,7 +60,7 @@ async def chat(
             empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
             db=db,
             nombre_agente="Agente Vendedor",
-            nombre_empresa=empresa.nombre,
+            nombre_empresa=nombre_empresa,
             tono=req.tono,
             instrucciones=req.instrucciones,
             usuario_id=None,
@@ -92,8 +94,6 @@ async def procesar_imagen_openai_vision(image_bytes: bytes, prompt: str, llm: st
     Procesa la imagen con OpenAI Vision y retorna la descripción generada.
     Si el LLM no entiende la imagen, retorna un mensaje claro.
     """
-    from openai import AsyncOpenAI
-    import base64
     client = AsyncOpenAI()
     try:
         # OpenAI Vision espera la imagen como base64
@@ -269,7 +269,7 @@ async def chat_audio(audio: UploadFile = File(...), tono: Optional[str] = Form("
         audio.file.seek(0)
         if size_mb > 10:
             raise HTTPException(status_code=400, detail="El audio supera el tamaño máximo de 10MB")
-        # --- Transcripción con OpenAI Whisper ---
+        # --- Transcripción con OpenAI Whisper (API asíncrona v1.x) ---
         try:
             OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
             if not OPENAI_API_KEY:
@@ -279,14 +279,14 @@ async def chat_audio(audio: UploadFile = File(...), tono: Optional[str] = Form("
                 tmp_audio.write(audio_bytes)
                 tmp_audio.flush()
                 tmp_audio.seek(0)
+                client = AsyncOpenAI(api_key=OPENAI_API_KEY)
                 with open(tmp_audio.name, "rb") as f:
-                    transcript = openai.Audio.transcribe(
-                        "whisper-1",
-                        f,
-                        api_key=OPENAI_API_KEY,
+                    transcript = await client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=f,
                         language="es"
                     )
-            transcripcion = transcript["text"]
+            transcripcion = transcript.text
         except Exception as e:
             logging.error(f"Error en transcripción Whisper: {str(e)}")
             transcripcion = "[Transcripción pendiente: servicio de audio aún no integrado o error de API]"
@@ -334,9 +334,9 @@ async def chat_router(
     - Puedes forzar el tipo y el LLM con los campos 'tipo' y 'llm'.
     """
     # TODO: Volver a usar empresa_id dinámico y autenticación en multiempresa
-    empresa = await db.get(Empresa, 1)
-    if not empresa:
-        raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
+    # empresa = await db.get(Empresa, 1)
+    # if not empresa:
+    #     raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
 
     tipo = req.tipo
     if not tipo:

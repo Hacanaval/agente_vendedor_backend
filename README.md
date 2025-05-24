@@ -108,13 +108,45 @@ alembic/          # Migraciones de base de datos
 
 ---
 
-## ⚠️ Seguridad y advertencias
-- **Modo MVP/pruebas:**
-  - No requiere autenticación JWT ni login en ningún endpoint.
-  - No soporta multiempresa: todos los endpoints trabajan únicamente con la empresa de id=1.
-  - Cualquier usuario o bot puede acceder y modificar datos sin restricciones.
-- **¡NO USAR ESTE MODO EN PRODUCCIÓN!**
-- Para pasar a producción: reactiva autenticación, roles y filtros por empresa_id siguiendo los TODOs y comentarios en el código.
+## ⚠️ MODO ABIERTO PARA PRUEBAS/MVP ⚠️
+
+Este backend está configurado actualmente en modo ABIERTO para pruebas/MVP:
+- No requiere autenticación JWT ni login en ningún endpoint.
+- No soporta multiempresa: todos los endpoints trabajan únicamente con la empresa de id=1.
+- Cualquier usuario o bot puede acceder y modificar datos sin restricciones.
+- Todos los modelos y endpoints ignoran empresa_id, usuario_id y roles.
+- El código contiene TODOs claros para restaurar seguridad y multiempresa.
+
+**¡NO USAR ESTE MODO EN PRODUCCIÓN!**
+No es seguro ni apto para entornos multiusuario o multiempresa.
+
+**Para pasar a producción y activar seguridad/multiempresa:**
+1. Reactiva la autenticación JWT en los endpoints administrativos y de negocio.
+2. Vuelve a exigir y validar el token JWT en los requests.
+3. Vuelve a requerir y filtrar por `empresa_id` en todos los endpoints y queries.
+4. Haz que el frontend y los bots envíen el `empresa_id` y el token JWT en cada request.
+5. Sigue los comentarios y TODOs en el código para restaurar la lógica multiempresa y de autenticación.
+
+---
+
+**ENGLISH:**
+
+This backend is currently configured in OPEN mode for testing/MVP only:
+- No JWT authentication or login is required for any endpoint.
+- No multi-tenant support: all endpoints work only with the company with id=1.
+- Any user or bot can access and modify data without restrictions.
+- All models and endpoints ignore empresa_id, usuario_id and roles.
+- The code contains clear TODOs to restore security and multi-tenancy.
+
+**DO NOT USE THIS MODE IN PRODUCTION!**
+It is not secure and not suitable for multi-user or multi-tenant environments.
+
+**To move to production and enable security/multi-tenancy:**
+1. Reactivate JWT authentication in all business/admin endpoints.
+2. Require and validate the JWT token in all requests.
+3. Require and filter by `empresa_id` in all endpoints and queries.
+4. Make frontend and bots send `empresa_id` and JWT token in every request.
+5. Follow the comments and TODOs in the code to restore multi-tenant and authentication logic.
 
 ---
 

@@ -24,10 +24,9 @@ async def crear_venta(
 ):
     # TODO: Volver a proteger con autenticación y multiempresa en producción
     try:
-        # 1. Validar que el producto exista y pertenezca a la empresa
+        # 1. Validar que el producto exista
         result = await db.execute(select(Producto).where(
-            Producto.id == data.producto_id,
-            Producto.empresa_id == 1  # TODO: Volver a usar empresa_id dinámico en multiempresa
+            Producto.id == data.producto_id
         ))
         producto = result.scalar_one_or_none()
         if not producto:
@@ -43,9 +42,7 @@ async def crear_venta(
         body = await request.json()
         chat_id = body.get("chat_id") if isinstance(body, dict) else None
         venta = Venta(
-            empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
             producto_id=producto.id,
-            usuario_id=None,  # Fijo en None para modo sin usuarios
             cantidad=data.cantidad,
             total=producto.precio * data.cantidad,
             chat_id=chat_id
@@ -54,8 +51,7 @@ async def crear_venta(
         await db.flush()
         await db.refresh(venta)
 
-        # 4. Registrar log
-        # TODO: Volver a registrar logs con usuario_id y empresa_id en multiempresa
+        # 4. Registrar log (opcional, sin empresa_id ni usuario_id)
         await db.commit()
         return venta
     except HTTPException:
@@ -70,7 +66,6 @@ async def listar_ventas(db: AsyncSession = Depends(get_db)):
     # TODO: Volver a filtrar por empresa_id y proteger con autenticación en producción
     result = await db.execute(
         select(Venta)
-        .where(Venta.empresa_id == 1)
     )
     ventas = result.scalars().all()
     return ventas
@@ -83,10 +78,7 @@ async def obtener_venta(
     # TODO: Volver a filtrar por empresa_id y proteger con autenticación en producción
     result = await db.execute(
         select(Venta)
-        .where(
-            Venta.id == venta_id,
-            Venta.empresa_id == 1
-        )
+        .where(Venta.id == venta_id)
     )
     venta = result.scalar_one_or_none()
     if not venta:
@@ -107,7 +99,7 @@ async def historial_ventas_chat(chat_id: str, db: AsyncSession = Depends(get_db)
         {
             "id": v.id,
             "chat_id": v.chat_id,
-            "productos": v.productos,  # Asume que productos es un campo serializable
+            "productos": getattr(v, "productos", None),  # Asume que productos es un campo serializable
             "total": v.total,
             "fecha": v.fecha.isoformat()
         }
