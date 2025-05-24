@@ -15,6 +15,7 @@ from app.services.prompts import prompt_vision, prompt_audio
 from app.models.mensaje import Mensaje
 from sqlalchemy import insert, select, or_
 from datetime import datetime
+import openai
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -81,12 +82,12 @@ class ChatImagenRequest(BaseModel):
     mensaje: Optional[str] = None  # prompt adicional opcional
     tono: Optional[str] = "formal"
     instrucciones: Optional[str] = ""
-    llm: Optional[str] = "gpt-4-vision-preview"
+    llm: Optional[str] = "gpt-4-vision"
 
 MAX_IMAGE_SIZE_MB = 2
 ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png"]
 
-async def procesar_imagen_openai_vision(image_bytes: bytes, prompt: str, llm: str = "gpt-4-vision-preview") -> str:
+async def procesar_imagen_openai_vision(image_bytes: bytes, prompt: str, llm: str = "gpt-4-vision") -> str:
     """
     Procesa la imagen con OpenAI Vision y retorna la descripción generada.
     Si el LLM no entiende la imagen, retorna un mensaje claro.
@@ -116,10 +117,10 @@ async def procesar_imagen_openai_vision(image_bytes: bytes, prompt: str, llm: st
         return desc
     except Exception as e:
         logging.error(f"Error en OpenAI Vision: {str(e)}")
-        return "No puedo interpretar la imagen con claridad."
+        return "[Procesamiento de imagen pendiente: servicio de visión aún no integrado o error de API]"
 
 @router.post("/imagen", summary="Procesa una imagen (archivo o URL) y responde usando visión + RAG", response_model=Dict[str, Any])
-async def chat_imagen(request: Request, imagen: Optional[UploadFile] = File(None), imagen_url: Optional[str] = Form(None), mensaje: Optional[str] = Form(None), tono: Optional[str] = Form("formal"), instrucciones: Optional[str] = Form(""), llm: Optional[str] = Form("gpt-4-vision-preview"), db: AsyncSession = Depends(get_db)):
+async def chat_imagen(request: Request, imagen: Optional[UploadFile] = File(None), imagen_url: Optional[str] = Form(None), mensaje: Optional[str] = Form(None), tono: Optional[str] = Form("formal"), instrucciones: Optional[str] = Form(""), llm: Optional[str] = Form("gpt-4-vision"), db: AsyncSession = Depends(get_db)):
     logging.info("Recibida petición en /chat/imagen")
     try:
         # 1. Obtener bytes de la imagen
@@ -259,9 +260,7 @@ async def chat_texto(request: Request, db: AsyncSession = Depends(get_db)):
         return {"respuesta": "[Respuesta dummy por error interno]"}
 
 # --- Audio ---
-from fastapi import UploadFile
-
-@router.post("/audio", summary="Procesa audio (stub/mock)", response_model=Dict[str, Any])
+@router.post("/audio", summary="Procesa audio (transcribe y responde)", response_model=Dict[str, Any])
 async def chat_audio(audio: UploadFile = File(...), tono: Optional[str] = Form("formal"), instrucciones: Optional[str] = Form(""), llm: Optional[str] = Form("openai-whisper"), db: AsyncSession = Depends(get_db)):
     logging.info("Recibida petición en /chat/audio")
     try:
@@ -270,7 +269,27 @@ async def chat_audio(audio: UploadFile = File(...), tono: Optional[str] = Form("
         audio.file.seek(0)
         if size_mb > 10:
             raise HTTPException(status_code=400, detail="El audio supera el tamaño máximo de 10MB")
-        transcripcion = "[Transcripción simulada: integración futura con Whisper/Gemini]"
+        # --- Transcripción con OpenAI Whisper ---
+        try:
+            OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+            if not OPENAI_API_KEY:
+                raise Exception("OPENAI_API_KEY no configurada")
+            audio_bytes = await audio.read()
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_audio:
+                tmp_audio.write(audio_bytes)
+                tmp_audio.flush()
+                tmp_audio.seek(0)
+                with open(tmp_audio.name, "rb") as f:
+                    transcript = openai.Audio.transcribe(
+                        "whisper-1",
+                        f,
+                        api_key=OPENAI_API_KEY,
+                        language="es"
+                    )
+            transcripcion = transcript["text"]
+        except Exception as e:
+            logging.error(f"Error en transcripción Whisper: {str(e)}")
+            transcripcion = "[Transcripción pendiente: servicio de audio aún no integrado o error de API]"
         audio_prompt = prompt_audio(transcripcion)
         respuesta = await consultar_rag(
             mensaje=audio_prompt,
