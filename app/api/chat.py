@@ -1,8 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.api.auth import get_current_user
-from app.models.usuario import Usuario
 from app.models.empresa import Empresa
 from typing import Dict, Any, Optional
 from app.services.rag import consultar_rag
