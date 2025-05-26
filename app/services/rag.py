@@ -54,13 +54,13 @@ async def consultar_rag(
                 pedido_actual = await PedidoManager.mostrar_pedido_actual(chat_id, db)
                 if pedido_actual:
                     productos_texto = "\n".join([
-                        f"- {p['producto']} x{p['cantidad']} = ${p['total']:,.2f}"
+                        f"- {p['producto']} x{p['cantidad']} = ${p['total']:,.0f}"
                         for p in pedido_actual['productos']
                     ])
                     datos_cliente = pedido_actual['datos_cliente']
                     datos_texto = "\n".join([f"- {k}: {v}" for k, v in datos_cliente.items() if v])
                     
-                    respuesta_pedido = f"📋 **Tu pedido actual:**\n\n**Productos:**\n{productos_texto}\n\n**Total: ${pedido_actual['total']:,.2f}**"
+                    respuesta_pedido = f"📋 **Tu pedido actual:**\n\n**Productos:**\n{productos_texto}\n\n**Total: ${pedido_actual['total']:,.0f}**"
                     
                     if datos_cliente:
                         respuesta_pedido += f"\n\n**Datos registrados:**\n{datos_texto}"
@@ -93,8 +93,8 @@ async def consultar_rag(
                 total_pedido = sum(p["total"] for p in productos_pedido)
                 info_pedido = f"\nPEDIDO ACTUAL DEL CLIENTE:\n"
                 for p in productos_pedido:
-                    info_pedido += f"- {p['producto']} x{p['cantidad']} = ${p['total']:,.2f}\n"
-                info_pedido += f"Total del pedido: ${total_pedido:,.2f}\n"
+                    info_pedido += f"- {p['producto']} x{p['cantidad']} = ${p['total']:,.0f}\n"
+                info_pedido += f"Total del pedido: ${total_pedido:,.0f}\n"
                 
                 if estado_pedido["campos_faltantes"]:
                     info_pedido += f"Datos faltantes: {', '.join(estado_pedido['campos_faltantes'])}\n"
@@ -282,7 +282,7 @@ async def consultar_rag(
                         # Personalizar respuesta para productos adicionales
                         if any(palabra in mensaje.lower() for palabra in ["también", "además", "agregar", "añadir"]):
                             respuesta = f"✅ Perfecto, he agregado {cantidad_detectada} {producto_detectado['nombre']} a tu pedido.\n\n"
-                            respuesta += f"Tu pedido ahora incluye {len(resultado_pedido['productos'])} productos por un total de ${resultado_pedido['total']:,.2f}.\n\n"
+                            respuesta += f"Tu pedido ahora incluye {len(resultado_pedido['productos'])} productos por un total de ${resultado_pedido['total']:,.0f}.\n\n"
                             respuesta += "¿Deseas agregar algo más o proceder con el pedido?"
                         
                         # IMPORTANTE: Retornar inmediatamente para evitar que se sobrescriba la respuesta
@@ -494,7 +494,7 @@ async def retrieval_inventario(mensaje: str, db):
                 # Producto único
                 p = productos_grupo[0]
                 disponibilidad = "Disponible" if p.stock > 10 else "Stock limitado" if p.stock > 0 else "Agotado"
-                contexto.append(f"{p.nombre}: {p.descripcion} (Precio: ${p.precio:,.2f}, {disponibilidad})")
+                contexto.append(f"{p.nombre}: {p.descripcion} (Precio: ${p.precio:,.0f}, {disponibilidad})")
             else:
                 # Múltiples variaciones del mismo producto
                 contexto.append(f"**{nombre_base}** - Disponible en las siguientes variaciones:")
@@ -502,7 +502,7 @@ async def retrieval_inventario(mensaje: str, db):
                     disponibilidad = "Disponible" if p.stock > 10 else "Stock limitado" if p.stock > 0 else "Agotado"
                     # Extraer solo la especificación diferenciadora
                     especificacion = p.nombre.replace(nombre_base, "").strip()
-                    contexto.append(f"  - {especificacion}: {p.descripcion} (Precio: ${p.precio:,.2f}, {disponibilidad})")
+                    contexto.append(f"  - {especificacion}: {p.descripcion} (Precio: ${p.precio:,.0f}, {disponibilidad})")
         
         contexto_str = "\n".join(contexto)
         logging.info(f"[retrieval_inventario] Contexto encontrado: {len(productos_encontrados)} productos en {len(productos_agrupados)} grupos")
