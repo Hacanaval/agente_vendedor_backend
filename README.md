@@ -151,24 +151,59 @@ Para escalar horizontalmente:
 ### Variables de Entorno Requeridas
 
 ```env
-# Base de datos
-DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/db
+# API Keys
+GOOGLE_API_KEY=your_google_api_key_here
+OPENAI_API_KEY=your_openai_api_key_here
 
-# OpenAI
-OPENAI_API_KEY=sk-xxx
-OPENAI_MODEL=gpt-3.5-turbo
+# Base de datos
+DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/dbname
+
+# Configuración de seguridad
+SECRET_KEY=your_secret_key_here
+BOT_SECRET_KEY=your_bot_secret_key_here
+
+# Configuración del servidor
+HOST=0.0.0.0
+PORT=8001
+
+# Configuración de Telegram
+BOT_TOKEN_FIXED=your_telegram_bot_token_here
+
+# Configuración de LLM
 OPENAI_MAX_TOKENS=300
 OPENAI_TEMPERATURE=0.2
+DEFAULT_MODEL=gemini-2.0-flash
 
-# Retrieval
-RETRIEVER_BACKEND=faiss  # o pinecone
-PINECONE_API_KEY=xxx     # si usa pinecone
-PINECONE_ENVIRONMENT=xxx # si usa pinecone
-
-# Seguridad (en producción)
-JWT_SECRET=xxx
-JWT_ALGORITHM=HS256
+# Configuración de logging
+LOG_LEVEL=INFO
+LOG_FILE=app.log
 ```
+
+### Configuración Inicial
+
+1. **Clonar el repositorio**:
+   ```bash
+   git clone <url-del-repositorio>
+   cd agente_vendedor
+   ```
+
+2. **Configurar entorno virtual**:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # En Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+
+3. **Configurar variables de entorno**:
+   ```bash
+   cp .env.example .env
+   # Editar .env con tus credenciales
+   ```
+
+4. **Verificar la configuración**:
+   ```bash
+   python tests/test_clasificacion.py
+   ```
 
 ### Cambios Recientes
 
@@ -192,22 +227,37 @@ JWT_ALGORITHM=HS256
    - Sincronización automática con FAISS
    - Validaciones mejoradas
 
+5. **Seguridad Mejorada**:
+   - Implementado `.gitignore` para proteger archivos sensibles
+   - Agregada verificación segura de API Keys
+   - Mejorado el manejo de logs para evitar exposición de datos sensibles
+   - Actualizado sistema de pruebas para validación segura
+
+6. **Integración con Gemini**:
+   - Migrado a Gemini 2.0 Flash como modelo principal
+   - Implementada clasificación de mensajes con Gemini
+   - Optimizado sistema de prompts para mejor rendimiento
+
 ### Próximos Pasos
 
 1. **Corto Plazo**:
    - Implementar caché de embeddings
    - Agregar más proveedores LLM
    - Mejorar logging y monitoreo
+   - Implementar pruebas de integración
+   - Agregar documentación de API con Swagger
 
 2. **Medio Plazo**:
-   - Migrar a Pinecone
-   - Implementar colas de procesamiento
-   - Reactivar seguridad multi-tenant
+   - Implementar sistema de caché con Redis
+   - Agregar soporte para más modelos de Gemini
+   - Mejorar el sistema de clasificación de mensajes
+   - Implementar métricas de rendimiento
 
 3. **Largo Plazo**:
    - Escalar a múltiples regiones
-   - Implementar A/B testing
-   - Agregar análisis de sentimiento
+   - Implementar sistema de backup automático
+   - Agregar soporte para más idiomas
+   - Implementar sistema de A/B testing
 
 ## ⚠️ MODO ABIERTO PARA PRUEBAS/MVP ⚠️
 
