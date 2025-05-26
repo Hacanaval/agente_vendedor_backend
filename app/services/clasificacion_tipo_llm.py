@@ -1,18 +1,27 @@
 import os
-from openai import AsyncOpenAI
+import logging
+from typing import Literal
+import google.generativeai as genai
 from app.services.prompts import SYSTEM_PROMPT_CLASIFICACION
 
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
-async def clasificar_tipo_mensaje_llm(mensaje: str) -> str:
-    prompt = SYSTEM_PROMPT_CLASIFICACION.format(mensaje=mensaje)
-    response = await client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "system", "content": prompt}],
-        max_tokens=1,
-        temperature=0,
-    )
-    categoria = response.choices[0].message.content.strip().lower()
-    if categoria not in ["inventario", "venta", "contexto"]:
-        categoria = "contexto"
-    return categoria 
+DEFAULT_MODEL = os.getenv("LLM_CLASIFICACION_MODEL", "gemini-2.0-flash")
+model = genai.GenerativeModel(DEFAULT_MODEL)
+
+async def clasificar_tipo_mensaje_llm(mensaje: str) -> Literal["inventario", "venta", "contexto"]:
+    """
+    Clasifica un mensaje en 'inventario', 'venta' o 'contexto' usando Gemini (Google).
+    Si el resultado no es válido, retorna 'contexto' por defecto.
+    """
+    prompt = f"{SYSTEM_PROMPT_CLASIFICACION}\nUsuario: {mensaje}\nRespuesta:"
+    try:
+        response = await model.generate_content_async(prompt)
+        categoria = response.text.strip().lower()
+        if categoria not in {"inventario", "venta", "contexto"}:
+            categoria = "contexto"
+        logging.info(f"[clasificar_tipo_mensaje_llm] Mensaje: {mensaje} -> Categoría: {categoria}")
+        return categoria
+    except Exception as e:
+        logging.error(f"[clasificar_tipo_mensaje_llm] Error al clasificar: {str(e)}")
+        return "contexto"

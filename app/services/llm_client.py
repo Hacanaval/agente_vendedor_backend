@@ -6,8 +6,8 @@ import google.generativeai as genai
 
 # Configuración
 DEFAULT_MODEL = "gemini-2.0-flash"
-DEFAULT_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "300"))
-DEFAULT_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.2"))
+DEFAULT_MAX_TOKENS = int(os.getenv("MAX_TOKENS", "300"))
+DEFAULT_TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
 
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 model = genai.GenerativeModel(DEFAULT_MODEL)
@@ -21,7 +21,7 @@ async def generar_respuesta_gemini(
     **kwargs
 ) -> str:
     """
-    Genera una respuesta usando OpenAI de forma asíncrona, con reintentos y logging robusto.
+    Genera una respuesta usando Gemini de forma asíncrona, con reintentos y logging robusto.
     """
     logging.info(f"[generar_respuesta_gemini] Entrada: prompt={prompt[:100]}..., system_prompt={system_prompt[:100] if system_prompt else None}")
     full_prompt = f"{system_prompt}\n{prompt}" if system_prompt else prompt
@@ -43,4 +43,4 @@ async def generar_respuesta(prompt: str, llm: str = "gemini", system_prompt: Opt
     if llm == "gemini":
         return await generar_respuesta_gemini(prompt, system_prompt=system_prompt, **kwargs)
     else:
-        raise ValueError(f"LLM no soportado: {llm}") 
+        raise ValueError(f"LLM no soportado: {llm}")

@@ -18,4 +18,4 @@ class VentaOut(BaseModel):
     # TODO: Reagregar empresa_id y usuario_id en modo multiempresa
 
     class Config:
-        orm_mode = True
+        from_attributes = True

@@ -1,13 +1,12 @@
 from typing import Any, Dict, Optional
+import logging
+from sqlalchemy.future import select
 from app.services.llm_client import generar_respuesta
 from app.services.retrieval.retriever_factory import get_retriever
 from app.models.producto import Producto
-from sqlalchemy.future import select
+from app.models.mensaje import Mensaje
 from app.services.prompts import prompt_ventas, prompt_empresa
 from app.services.contextos import CONTEXTO_EMPRESA_SEXTINVALLE
-from app.services.logs import registrar_log
-import logging
-from app.models.mensaje import Mensaje
 
 async def consultar_rag(
     mensaje: str,
@@ -26,81 +25,81 @@ async def consultar_rag(
     Pipeline RAG: retrieval, generación y respuesta.
     """
     try:
-        # Obtener historial de conversación relevante
+        # Memoria conversacional reciente (últimos 10 mensajes)
         historial_contexto = ""
         if chat_id:
             result = await db.execute(
                 select(Mensaje)
                 .where(Mensaje.chat_id == chat_id)
                 .order_by(Mensaje.timestamp.desc())
-                .limit(5)
+                .limit(10)
             )
-            historial = result.scalars().all()[::-1]  # Los 5 más recientes, en orden cronológico
+            historial = result.scalars().all()[::-1]  # Orden cronológico
             historial_contexto = "\n".join([
                 f"{m.remitente}: {m.mensaje}" + 
                 (f" (Estado: {m.estado_venta})" if m.estado_venta else "")
                 for m in historial
             ])
-            logging.info(f"[consultar_rag] Historial de conversación: {historial_contexto[:200]}...")
+            logging.info(f"[consultar_rag] Historial de conversación: {historial_contexto[:300]}...")
 
-        # 1. Retrieval según tipo
+        # Retrieval según tipo de consulta
         logging.info(f"[consultar_rag] Tipo de consulta recibido: {tipo}")
         if tipo in ("inventario", "venta"):
             contexto = await retrieval_inventario(mensaje, db)
-            if not contexto or contexto.strip() == "" or contexto.startswith("No se encontraron") or contexto.startswith("No hay productos"):
-                logging.info("[consultar_rag] No hay productos disponibles, agregando instrucción especial al prompt")
-                system_prompt, user_prompt = prompt_ventas(
-                    contexto=contexto,
-                    mensaje=mensaje,
-                    nombre_agente=nombre_agente,
-                    nombre_empresa=nombre_empresa,
-                    tono=tono,
-                    instrucciones=instrucciones + "\n" + 
-                        "IMPORTANTE:\n" +
-                        "1. Si no hay productos en el inventario, responde claramente que no tenemos productos disponibles para esa consulta.\n" +
-                        "2. No inventes ni sugieras productos fuera del inventario.\n" +
-                        "3. Ten en cuenta el siguiente historial de la conversación:\n" + historial_contexto
-                )
-            else:
-                system_prompt, user_prompt = prompt_ventas(
-                    contexto=contexto,
-                    mensaje=mensaje,
-                    nombre_agente=nombre_agente,
-                    nombre_empresa=nombre_empresa,
-                    tono=tono,
-                    instrucciones=instrucciones + "\nTen en cuenta el siguiente historial de la conversación:\n" + historial_contexto
-                )
+            instrucciones_extra = instrucciones + (
+                "\nIMPORTANTE:\n1. Si no hay productos en el inventario, responde claramente que no tenemos productos disponibles para esa consulta.\n"
+                "2. No inventes ni sugieras productos fuera del inventario.\n"
+                f"3. Historial reciente de la conversación:\n{historial_contexto}\n"
+            )
+            system_prompt, user_prompt = prompt_ventas(
+                contexto=contexto,
+                mensaje=mensaje,
+                nombre_agente=nombre_agente,
+                nombre_empresa=nombre_empresa,
+                tono=tono,
+                instrucciones=instrucciones_extra
+            )
             logging.info(f"[consultar_rag] Contexto inventario obtenido: {contexto[:200]}...")
         elif tipo == "contexto":
             contexto = await retrieval_contexto_empresa(mensaje, db)
             if not contexto or contexto.strip() == "":
                 contexto = "No se encontró información relevante sobre la empresa."
-            logging.info(f"[consultar_rag] Contexto empresa obtenido: {contexto[:200]}...")
+            instrucciones_extra = instrucciones + (
+                f"\nHistorial reciente de la conversación:\n{historial_contexto}\n"
+            )
             system_prompt, user_prompt = prompt_empresa(
                 contexto=contexto,
                 mensaje=mensaje,
                 nombre_agente=nombre_agente,
                 nombre_empresa=nombre_empresa,
                 tono=tono,
-                instrucciones=instrucciones + "\nTen en cuenta el siguiente historial de la conversación:\n" + historial_contexto
+                instrucciones=instrucciones_extra
             )
+            logging.info(f"[consultar_rag] Contexto empresa obtenido: {contexto[:200]}...")
+        else:
+            return {
+                "respuesta": "Lo siento, no entendí tu pregunta. ¿Puedes reformularla o ser más específico?",
+                "estado_venta": None,
+                "tipo_mensaje": tipo,
+                "metadatos": None
+            }
 
-        # 2. Generar respuesta
+        # LLM (responde usando prompt)
         respuesta = await generar_respuesta(
             prompt=user_prompt,
             system_prompt=system_prompt,
             llm=llm
         )
 
-        # 3. Determinar estado de venta si aplica
+        # Estado de venta: heurística básica
         estado_venta = None
         metadatos = None
         if tipo == "venta":
-            if any(palabra in respuesta.lower() for palabra in ["¿deseas", "quieres confirmar", "te gustaría agregarlo", "confirmar pedido"]):
+            if any(x in respuesta.lower() for x in ["¿deseas", "quieres confirmar", "te gustaría agregarlo", "confirmar pedido"]):
                 estado_venta = "pendiente"
-            elif any(palabra in respuesta.lower() for palabra in ["pedido registrado", "compra confirmada", "venta realizada"]):
+            elif any(x in respuesta.lower() for x in ["pedido registrado", "compra confirmada", "venta realizada"]):
                 estado_venta = "cerrada"
-            elif any(palabra in mensaje.lower() for palabra in ["cotización", "precio", "costo"]):
+            elif any(x in mensaje.lower() for x in ["cotización", "precio", "costo"]):
                 estado_venta = "iniciada"
 
         return {
@@ -111,7 +110,7 @@ async def consultar_rag(
         }
 
     except Exception as e:
-        logging.error(f"Error en consultar_rag: {str(e)}")
+        logging.error(f"[consultar_rag] Error: {str(e)}")
         return {
             "respuesta": "Lo siento, hubo un error al procesar tu consulta. Por favor, intenta de nuevo.",
             "estado_venta": None,
@@ -121,7 +120,8 @@ async def consultar_rag(
 
 async def retrieval_inventario(mensaje: str, db):
     """
-    Recupera productos relevantes usando búsqueda semántica.
+    Recupera productos relevantes usando búsqueda semántica (FAISS o Pinecone).
+    Solo productos activos y con stock > 0.
     """
     try:
         retriever = get_retriever(db)
@@ -151,12 +151,12 @@ async def retrieval_inventario(mensaje: str, db):
         logging.info(f"[retrieval_inventario] Contexto encontrado: {contexto_str[:200]}...")
         return contexto_str
     except Exception as e:
-        logging.error(f"Error en retrieval_inventario: {str(e)}")
+        logging.error(f"[retrieval_inventario] Error: {str(e)}")
         return "Error al buscar productos. Por favor, intenta de nuevo."
 
 async def retrieval_contexto_empresa(mensaje: str, db):
     """
     Recupera contexto de la empresa.
-    Por ahora usa un contexto estático, pero se puede extender para cargar dinámicamente.
+    (Actualmente estático, pero puede mejorarse para cargar dinámicamente en el futuro).
     """
     return CONTEXTO_EMPRESA_SEXTINVALLE

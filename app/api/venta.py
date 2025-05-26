@@ -1,7 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import joinedload
 from app.core.database import get_db
 from app.models.venta import Venta
 from app.models.producto import Producto
@@ -19,15 +18,15 @@ router = APIRouter(
 @router.post("/", response_model=VentaOut)
 async def crear_venta(
     data: VentaCreate,
-    request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    request: Request = None  # solo si necesitas el chat_id del body (opcional)
 ):
-    # TODO: Volver a proteger con autenticación y multiempresa en producción
+    """
+    Crea una venta: valida stock, descuenta producto y registra la venta.
+    """
     try:
-        # 1. Validar que el producto exista
-        result = await db.execute(select(Producto).where(
-            Producto.id == data.producto_id
-        ))
+        # 1. Validar producto y stock
+        result = await db.execute(select(Producto).where(Producto.id == data.producto_id))
         producto = result.scalar_one_or_none()
         if not producto:
             raise HTTPException(status_code=404, detail="Producto no encontrado")
@@ -38,20 +37,23 @@ async def crear_venta(
         producto.stock -= data.cantidad
         await db.flush()
 
-        # 3. Registrar venta
-        body = await request.json()
-        chat_id = body.get("chat_id") if isinstance(body, dict) else None
+        # 3. Obtener chat_id si es relevante (pasa por el modelo o body)
+        chat_id = getattr(data, "chat_id", None)
+        if not chat_id and request:
+            body = await request.json()
+            chat_id = body.get("chat_id")
+
+        # 4. Crear y registrar la venta
         venta = Venta(
             producto_id=producto.id,
             cantidad=data.cantidad,
             total=producto.precio * data.cantidad,
             chat_id=chat_id
+            # empresa_id=... # para multiempresa en el futuro
         )
         db.add(venta)
         await db.flush()
         await db.refresh(venta)
-
-        # 4. Registrar log (opcional, sin empresa_id ni usuario_id)
         await db.commit()
         return venta
     except HTTPException:
@@ -63,23 +65,15 @@ async def crear_venta(
 
 @router.get("/", response_model=List[VentaOut])
 async def listar_ventas(db: AsyncSession = Depends(get_db)):
-    # TODO: Volver a filtrar por empresa_id y proteger con autenticación en producción
-    result = await db.execute(
-        select(Venta)
-    )
-    ventas = result.scalars().all()
-    return ventas
+    result = await db.execute(select(Venta))
+    return result.scalars().all()
 
 @router.get("/{venta_id}", response_model=VentaOut)
 async def obtener_venta(
     venta_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    # TODO: Volver a filtrar por empresa_id y proteger con autenticación en producción
-    result = await db.execute(
-        select(Venta)
-        .where(Venta.id == venta_id)
-    )
+    result = await db.execute(select(Venta).where(Venta.id == venta_id))
     venta = result.scalar_one_or_none()
     if not venta:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
@@ -87,10 +81,6 @@ async def obtener_venta(
 
 @router.get("/historial/{chat_id}", summary="Historial de ventas de un chat", response_model=List[dict])
 async def historial_ventas_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
-    """
-    Devuelve el historial de ventas asociadas a un chat_id (usuario/cliente), ordenadas por fecha descendente.
-    """
-    # TODO: Filtrar por empresa_id en multiempresa
     result = await db.execute(
         select(Venta).where(Venta.chat_id == chat_id).order_by(Venta.fecha.desc())
     )
@@ -99,11 +89,10 @@ async def historial_ventas_chat(chat_id: str, db: AsyncSession = Depends(get_db)
         {
             "id": v.id,
             "chat_id": v.chat_id,
-            "productos": getattr(v, "productos", None),  # Asume que productos es un campo serializable
+            "producto_id": getattr(v, "producto_id", None),
+            "cantidad": getattr(v, "cantidad", None),
             "total": v.total,
             "fecha": v.fecha.isoformat()
         }
         for v in ventas
     ]
-
-# (Opcional: agrega aquí endpoint de actualizar/eliminar venta si lo necesitas en el futuro)

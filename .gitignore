@@ -27,10 +27,8 @@ wheels/
 
 # Entornos virtuales
 venv/
-ENV/
 env/
-.env/
-.venv/
+ENV/
 
 # Logs
 *.log
@@ -47,16 +45,29 @@ log/
 # Archivos de base de datos
 *.db
 *.sqlite3
-*.sqlite
 
 # Archivos temporales
 *.tmp
 *.temp
 .coverage
 htmlcov/
+
+# Archivos de caché
+.cache/
 .pytest_cache/
 .mypy_cache/
 
-# Archivos de configuración local
-config.local.py
-settings.local.py 
+# Archivos de FAISS
+*.index
+*.faiss
+
+# Archivos de audio/imagen temporales
+temp_*.ogg
+temp_*.jpg
+temp_*.png
+temp_*.mp3
+temp_*.wav
+
+# Archivos de migración (excepto la inicial)
+alembic/versions/*
+!alembic/versions/.gitkeep 

@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 import logging
+import time
 
 # Configuración de logging
 logging.basicConfig(level=logging.INFO)
@@ -70,8 +71,8 @@ def probar_clasificacion():
     verificar_api_key()
     
     print("\n=== Pruebas de Clasificación de Mensajes ===\n")
-    print("Categoría\tMensaje")
-    print("-" * 80)
+    print("N°\tCategoría\tTiempo (s)\tMensaje")
+    print("-" * 100)
     
     resultados = {
         "inventario": 0,
@@ -79,20 +80,34 @@ def probar_clasificacion():
         "contexto": 0
     }
     
-    for mensaje in CASOS_PRUEBA:
+    tiempos = []
+    
+    for i, mensaje in enumerate(CASOS_PRUEBA, 1):
         try:
+            inicio = time.time()
             categoria = clasificar_tipo_mensaje_llm(mensaje)
+            tiempo = time.time() - inicio
+            tiempos.append(tiempo)
+            
             resultados[categoria] += 1
-            print(f"{categoria:<12}\t{mensaje}")
+            print(f"{i:02d}\t{categoria:<12}\t{tiempo:.3f}\t\t{mensaje}")
         except Exception as e:
             logger.error(f"Error al clasificar mensaje '{mensaje}': {str(e)}")
-            print(f"ERROR\t\t{mensaje} (Error: {str(e)})")
+            print(f"{i:02d}\tERROR\t\tN/A\t\t{mensaje} (Error: {str(e)})")
+    
+    tiempo_promedio = sum(tiempos) / len(tiempos) if tiempos else 0
+    tiempo_max = max(tiempos) if tiempos else 0
+    tiempo_min = min(tiempos) if tiempos else 0
     
     print("\n=== Resumen de Resultados ===")
     print(f"Total mensajes probados: {len(CASOS_PRUEBA)}")
     print(f"Inventario: {resultados['inventario']} ({resultados['inventario']/len(CASOS_PRUEBA)*100:.1f}%)")
     print(f"Venta: {resultados['venta']} ({resultados['venta']/len(CASOS_PRUEBA)*100:.1f}%)")
     print(f"Contexto: {resultados['contexto']} ({resultados['contexto']/len(CASOS_PRUEBA)*100:.1f}%)")
+    print("\n=== Métricas de Tiempo ===")
+    print(f"Tiempo promedio: {tiempo_promedio:.3f} segundos")
+    print(f"Tiempo mínimo: {tiempo_min:.3f} segundos")
+    print(f"Tiempo máximo: {tiempo_max:.3f} segundos")
 
 if __name__ == "__main__":
     probar_clasificacion() 

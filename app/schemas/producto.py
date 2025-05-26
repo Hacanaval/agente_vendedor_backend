@@ -21,4 +21,4 @@ class ProductoOut(ProductoBase):
     # TODO: Reagregar empresa_id en modo multiempresa
 
     class Config:
-        orm_mode = True
+        from_attributes = True
