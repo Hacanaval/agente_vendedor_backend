@@ -7,6 +7,7 @@ from app.models.producto import Producto
 from app.models.mensaje import Mensaje
 from app.services.prompts import prompt_ventas, prompt_empresa
 from app.services.contextos import CONTEXTO_EMPRESA_SEXTINVALLE
+from app.services.pedidos import PedidoManager
 
 async def consultar_rag(
     mensaje: str,
@@ -27,6 +28,8 @@ async def consultar_rag(
     try:
         # Memoria conversacional reciente (últimos 10 mensajes)
         historial_contexto = ""
+        estado_pedido = {"tiene_pedido": False}
+        
         if chat_id:
             result = await db.execute(
                 select(Mensaje)
@@ -41,15 +44,65 @@ async def consultar_rag(
                 for m in historial
             ])
             logging.info(f"[consultar_rag] Historial de conversación: {historial_contexto[:300]}...")
+            
+            # Obtener estado del pedido actual
+            estado_pedido = await PedidoManager.obtener_estado_pedido(chat_id, db)
+            
+            # Verificar si el usuario está pidiendo ver su pedido
+            if any(palabra in mensaje.lower() for palabra in ["mi pedido", "pedido actual", "mostrar pedido", "ver pedido", "resumen pedido"]):
+                pedido_actual = await PedidoManager.mostrar_pedido_actual(chat_id, db)
+                if pedido_actual:
+                    productos_texto = "\n".join([
+                        f"- {p['producto']} x{p['cantidad']} = ${p['total']:,.2f}"
+                        for p in pedido_actual['productos']
+                    ])
+                    datos_cliente = pedido_actual['datos_cliente']
+                    datos_texto = "\n".join([f"- {k}: {v}" for k, v in datos_cliente.items() if v])
+                    
+                    respuesta_pedido = f"📋 **Tu pedido actual:**\n\n**Productos:**\n{productos_texto}\n\n**Total: ${pedido_actual['total']:,.2f}**"
+                    
+                    if datos_cliente:
+                        respuesta_pedido += f"\n\n**Datos registrados:**\n{datos_texto}"
+                    
+                    if pedido_actual['campos_faltantes']:
+                        respuesta_pedido += f"\n\n⚠️ **Faltan datos:** {', '.join(pedido_actual['campos_faltantes'])}"
+                    
+                    return {
+                        "respuesta": respuesta_pedido,
+                        "estado_venta": pedido_actual['estado'],
+                        "tipo_mensaje": "venta",
+                        "metadatos": pedido_actual
+                    }
+                else:
+                    return {
+                        "respuesta": "No tienes ningún pedido activo en este momento. ¿Te gustaría ver nuestros productos disponibles?",
+                        "estado_venta": None,
+                        "tipo_mensaje": "venta",
+                        "metadatos": None
+                    }
 
         # Retrieval según tipo de consulta
         logging.info(f"[consultar_rag] Tipo de consulta recibido: {tipo}")
         if tipo in ("inventario", "venta"):
             contexto = await retrieval_inventario(mensaje, db)
+            # Información del pedido actual para el contexto
+            info_pedido = ""
+            if estado_pedido["tiene_pedido"]:
+                productos_pedido = estado_pedido["productos"]
+                total_pedido = sum(p["total"] for p in productos_pedido)
+                info_pedido = f"\nPEDIDO ACTUAL DEL CLIENTE:\n"
+                for p in productos_pedido:
+                    info_pedido += f"- {p['producto']} x{p['cantidad']} = ${p['total']:,.2f}\n"
+                info_pedido += f"Total del pedido: ${total_pedido:,.2f}\n"
+                
+                if estado_pedido["campos_faltantes"]:
+                    info_pedido += f"Datos faltantes: {', '.join(estado_pedido['campos_faltantes'])}\n"
+            
             instrucciones_extra = instrucciones + (
                 "\nIMPORTANTE:\n1. Si no hay productos en el inventario, responde claramente que no tenemos productos disponibles para esa consulta.\n"
                 "2. No inventes ni sugieras productos fuera del inventario.\n"
                 f"3. Historial reciente de la conversación:\n{historial_contexto}\n"
+                f"{info_pedido}"
             )
             system_prompt, user_prompt = prompt_ventas(
                 contexto=contexto,
