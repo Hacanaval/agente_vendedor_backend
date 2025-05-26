@@ -70,4 +70,13 @@ temp_*.wav
 
 # Archivos de migración (excepto la inicial)
 alembic/versions/*
-!alembic/versions/.gitkeep 
+!alembic/versions/.gitkeep
+
+# Archivos de test y debugging
+test_*.py
+debug_*.py
+verificar_*.py
+crear_pedidos_demo.py
+comparacion_*.py
+dashboard_*.html
+REPORTE_*.md 

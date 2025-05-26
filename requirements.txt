@@ -17,6 +17,9 @@ psycopg2-binary==2.9.9
 google-generativeai==0.3.2
 faiss-cpu==1.7.4
 numpy==1.26.4
+Pillow==11.2.1
+openai==1.81.0
+pydub==0.25.1
 
 # Telegram
 python-telegram-bot==20.8

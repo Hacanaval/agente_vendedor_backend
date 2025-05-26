@@ -8,6 +8,8 @@ from app.api.producto import router as producto_router
 from app.api.venta import router as venta_router
 from app.api.logs import router as logs_router
 from app.api.chat import router as chat_router
+from app.api.pedidos import router as pedidos_router
+from app.api.admin import router as admin_router
 
 # Instancia FastAPI
 app = FastAPI(
@@ -31,6 +33,8 @@ app.include_router(producto_router)
 app.include_router(venta_router)
 app.include_router(logs_router)
 app.include_router(chat_router)
+app.include_router(pedidos_router)
+app.include_router(admin_router)
 
 # Healthcheck o raíz
 @app.get("/")
