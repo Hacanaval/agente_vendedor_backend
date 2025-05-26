@@ -297,8 +297,9 @@ async def consultar_rag(
                 else:
                     logging.warning(f"[consultar_rag] No se detectó producto o cantidad válida")
             
-            # Detectar confirmación de compra
-            elif any(palabra in mensaje.lower() for palabra in ["sí", "confirmo", "acepto", "está bien", "perfecto", "solo eso", "nada más"]):
+            # Detectar confirmación de compra (incluyendo mensajes con "dame las X unidades")
+            elif (any(palabra in mensaje.lower() for palabra in ["sí", "confirmo", "acepto", "está bien", "perfecto", "solo eso", "nada más", "dame"]) or
+                  ("dame" in mensaje.lower() and any(palabra in mensaje.lower() for palabra in ["unidades", "unidad"]))):
                 estado_actual = await PedidoManager.obtener_estado_pedido(chat_id, db)
                 if estado_actual["tiene_pedido"]:
                     estado_venta = "recolectando_datos"  # Cambiar a recolectando_datos para iniciar el flujo
@@ -316,7 +317,14 @@ async def consultar_rag(
                             "barrio": "barrio",
                             "indicaciones_adicionales": "indicaciones adicionales"
                         }
-                        respuesta += f"\n\nPara procesar tu pedido, necesito algunos datos. Empecemos con tu {campo_nombres.get(primer_campo, primer_campo)}."
+                        respuesta = f"✅ Perfecto, procederemos con tu pedido.\n\nPara procesar tu pedido, necesito algunos datos. Empecemos con tu {campo_nombres.get(primer_campo, primer_campo)}."
+                        
+                        return {
+                            "respuesta": respuesta,
+                            "estado_venta": estado_venta,
+                            "tipo_mensaje": "venta",
+                            "metadatos": metadatos
+                        }
             
             # Estado por defecto basado en heurística
             if not estado_venta:
@@ -660,8 +668,14 @@ async def detectar_campo_cliente(mensaje: str, campos_faltantes: list):
     mensaje_lower = mensaje.lower().strip()
     
     # Excluir mensajes de confirmación/negación que no son datos del cliente
-    confirmaciones = ["sí", "si", "confirmo", "acepto", "está bien", "perfecto", "ok", "vale", "no", "nada más", "solo eso"]
-    if any(conf in mensaje_lower for conf in confirmaciones) and len(mensaje.split()) <= 3:
+    confirmaciones = ["sí", "si", "confirmo", "acepto", "está bien", "perfecto", "ok", "vale", "no", "nada más", "solo eso", "dame", "por favor"]
+    if any(conf in mensaje_lower for conf in confirmaciones):
+        return None
+    
+    # Excluir mensajes que contienen números y palabras de productos (claramente no son datos del cliente)
+    palabras_productos = ["unidades", "unidad", "producto", "productos", "cinta", "extintor", "casco", "guantes", "botas"]
+    if (any(char.isdigit() for char in mensaje) and 
+        any(palabra in mensaje_lower for palabra in palabras_productos)):
         return None
     
     # Si el mensaje parece ser un número de teléfono celular (10 dígitos que empiezan por 3)
