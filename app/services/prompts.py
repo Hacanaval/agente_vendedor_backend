@@ -152,15 +152,30 @@ def prompt_vision(mensaje: str = "", instrucciones: str = "") -> str:
     """
     Prompt para describir imágenes con LLM Vision. 
     """
-    return (
-        "Eres un asistente experto en interpretar imágenes para ventas, inventario o soporte. "
-        "Describe la imagen de forma útil y relevante para el contexto empresarial. "
-        "Si el usuario pide información específica, responde solo a eso. "
-        "No describas detalles irrelevantes para ventas o inventario. "
-        "Si no puedes interpretar la imagen, dilo explícitamente. "
-        f"{instrucciones}\n"
-        f"Mensaje adicional del usuario: {mensaje}"
-    )
+    if mensaje and mensaje.strip():
+        return (
+            "Eres un asistente experto en interpretar imágenes para ventas, inventario o soporte. "
+            "El usuario ha enviado una imagen junto con el siguiente mensaje: "
+            f"'{mensaje}'\n\n"
+            "INSTRUCCIONES:\n"
+            "1. Analiza la imagen en el contexto del mensaje del usuario\n"
+            "2. Responde específicamente a lo que el usuario está preguntando\n"
+            "3. Si el usuario pregunta sobre disponibilidad, identifica el producto en la imagen\n"
+            "4. Si el usuario hace una pregunta específica, enfócate en responder esa pregunta\n"
+            "5. Describe la imagen de forma útil para el contexto de ventas/inventario\n"
+            "6. No describas detalles irrelevantes\n\n"
+            f"Mensaje del usuario: {mensaje}\n"
+            f"{instrucciones}"
+        )
+    else:
+        return (
+            "Eres un asistente experto en interpretar imágenes para ventas, inventario o soporte. "
+            "Describe la imagen de forma útil y relevante para el contexto empresarial. "
+            "Identifica productos, características técnicas, marcas, modelos si son visibles. "
+            "No describas detalles irrelevantes para ventas o inventario. "
+            "Si no puedes interpretar la imagen, dilo explícitamente. "
+            f"{instrucciones}"
+        )
 
 def prompt_audio(transcripcion: str, instrucciones: str = "") -> str:
     """

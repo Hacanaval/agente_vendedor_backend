@@ -53,9 +53,10 @@ async def consultar_backend_texto(mensaje: str, user_id: int, chat_id: str = Non
         logging.error(f"Error al consultar backend: {str(e)}")
         return "Lo siento, no puedo procesar tu consulta en este momento. Intenta de nuevo más tarde."
 
-async def consultar_backend_imagen(image_path: str, user_id: int) -> str:
+async def consultar_backend_imagen(image_path: str, user_id: int, caption: str = "") -> str:
     """
     Procesa imágenes con manejo robusto de errores.
+    Incluye el caption (texto adjunto) si está presente.
     """
     url = f"{BACKEND_URL}/chat/imagen"
     
@@ -63,7 +64,8 @@ async def consultar_backend_imagen(image_path: str, user_id: int) -> str:
         async with httpx.AsyncClient(timeout=60.0) as client:
             with open(image_path, "rb") as f:
                 files = {"imagen": (os.path.basename(image_path), f, "image/jpeg")}
-                response = await client.post(url, files=files)
+                data = {"mensaje": caption} if caption else {}
+                response = await client.post(url, files=files, data=data)
                 
             if response.status_code == 200:
                 data = response.json()
@@ -117,11 +119,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Maneja imágenes con cleanup automático.
+    Incluye el caption (texto adjunto) si está presente.
     """
     user_id = update.message.from_user.id
+    chat_id = str(update.message.chat_id)
     photo = update.message.photo[-1]  # Máxima resolución
+    caption = update.message.caption or ""  # Capturar el texto adjunto
     
-    logging.info(f"Imagen recibida de usuario {user_id}")
+    logging.info(f"Imagen recibida de usuario {user_id} en chat {chat_id}")
+    if caption:
+        logging.info(f"Caption incluido: {caption}")
     
     temp_file = None
     try:
@@ -129,7 +136,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             temp_file = tf.name
             file = await context.bot.get_file(photo.file_id)
             await file.download_to_drive(tf.name)
-            respuesta = await consultar_backend_imagen(tf.name, user_id)
+            respuesta = await consultar_backend_imagen(tf.name, user_id, caption)
             
         await update.message.reply_text(respuesta)
         
