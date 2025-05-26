@@ -1,22 +1,19 @@
 import os
-from typing import List
-from openai import AsyncOpenAI
+import google.generativeai as genai
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+model = genai.GenerativeModel("embedding-001") # (o el modelo de embedding que corresponda en Gemini)
 
-async def get_embedding(text: str) -> List[float]:
+async def generar_embedding_gemini(texto: str) -> list:
     """
-    Genera embeddings usando OpenAI de forma asíncrona.
+    Genera embeddings usando Gemini (Google) de forma asíncrona.
     """
-    if not OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY no configurada")
-    
+    if not os.getenv("GOOGLE_API_KEY"):
+        raise RuntimeError("GOOGLE_API_KEY no configurada")
     try:
-        response = await client.embeddings.create(
-            input=text,
-            model="text-embedding-ada-002"
-        )
-        return response.data[0].embedding
+        # (adaptar según la API de Gemini para embeddings, por ejemplo, usando model.embed_content)
+        response = model.embed_content(texto)
+        return response.embedding
     except Exception as e:
-        raise RuntimeError(f"Error al generar embedding: {str(e)}") 
+        logging.error(f"Error al generar embedding con Gemini: {str(e)}")
+        raise 

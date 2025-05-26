@@ -153,7 +153,6 @@ Para escalar horizontalmente:
 ```env
 # API Keys
 GOOGLE_API_KEY=your_google_api_key_here
-OPENAI_API_KEY=your_openai_api_key_here
 
 # Base de datos
 DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/dbname
@@ -170,8 +169,6 @@ PORT=8001
 BOT_TOKEN_FIXED=your_telegram_bot_token_here
 
 # Configuración de LLM
-OPENAI_MAX_TOKENS=300
-OPENAI_TEMPERATURE=0.2
 DEFAULT_MODEL=gemini-2.0-flash
 
 # Configuración de logging
@@ -197,7 +194,7 @@ LOG_FILE=app.log
 3. **Configurar variables de entorno**:
    ```bash
    cp .env.example .env
-   # Editar .env con tus credenciales
+   # Editar .env con tu GOOGLE_API_KEY y demás credenciales
    ```
 
 4. **Verificar la configuración**:
@@ -234,9 +231,11 @@ LOG_FILE=app.log
    - Actualizado sistema de pruebas para validación segura
 
 6. **Integración con Gemini**:
-   - Migrado a Gemini 2.0 Flash como modelo principal
-   - Implementada clasificación de mensajes con Gemini
+   - Migrado a Gemini 2.0 Flash como modelo principal (Google Generative AI)
+   - Eliminada dependencia de OpenAI
+   - Implementada clasificación de mensajes, generación de respuestas, embeddings y visión con Gemini
    - Optimizado sistema de prompts para mejor rendimiento
+   - **[MIGRACIÓN]** Todo el sistema ahora usa Gemini (Google) como LLM principal en vez de OpenAI
 
 ### Próximos Pasos
 

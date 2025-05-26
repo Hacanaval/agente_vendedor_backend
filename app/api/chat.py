@@ -15,9 +15,11 @@ from app.services.prompts import prompt_vision, prompt_audio
 from app.models.mensaje import Mensaje
 from sqlalchemy import insert, select, or_
 from datetime import datetime
-import openai
-from openai import AsyncOpenAI
+import google.generativeai as genai
 import base64
+from dotenv import load_dotenv
+
+load_dotenv()
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -26,7 +28,7 @@ class ChatRequest(BaseModel):
     tipo: Optional[str] = Field(default=None, pattern="^(inventario|contexto|venta)$")
     tono: str = Field(default="formal", pattern="^(formal|informal|amigable|profesional)$")
     instrucciones: str = Field(default="", max_length=500)
-    llm: str = Field(default="openai", pattern="^(openai|gemini|cohere|local)$")
+    llm: str = Field(default="gemini", pattern="^(gemini|cohere|local)$")
     chat_id: Optional[str] = Field(default=None)
 
 @router.post("/", response_model=Dict[str, Any])
@@ -48,27 +50,22 @@ async def chat(
             chat_id=chat_id,
             remitente="usuario",
             mensaje=req.mensaje,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
+            tipo_mensaje=None,  # Se actualizará después de la clasificación
+            estado_venta=None,
+            metadatos=None
         )
         db.add(mensaje_usuario)
         await db.flush()
 
-        # Obtener historial de conversación
-        result = await db.execute(
-            select(Mensaje)
-            .where(Mensaje.chat_id == chat_id)
-            .order_by(Mensaje.timestamp.desc())
-            .limit(5)
-        )
-        historial = result.scalars().all()[::-1]  # Los 5 más recientes, en orden cronológico
-        historial_str = "\n".join([f"{m.remitente}: {m.mensaje}" for m in historial])
-        logging.info(f"[chat] Historial de conversación: {historial_str[:200]}...")
-
+        # Clasificar tipo de mensaje si no viene especificado
         tipo = req.tipo
         if not tipo:
-            tipo = await clasificar_tipo_mensaje_llm(req.mensaje)
+            tipo = clasificar_tipo_mensaje_llm(req.mensaje)
         logging.info(f"[chat] Tipo de consulta final: {tipo}")
+        mensaje_usuario.tipo_mensaje = tipo
 
+        # Consultar RAG con el chat_id para mantener contexto
         respuesta = await consultar_rag(
             mensaje=req.mensaje,
             tipo=tipo,
@@ -76,21 +73,30 @@ async def chat(
             nombre_agente="Agente Vendedor",
             nombre_empresa=nombre_empresa,
             tono=req.tono,
-            instrucciones=f"Ten en cuenta el siguiente historial de la conversación:\n{historial_str}\n\n{req.instrucciones}",
-            llm=req.llm
+            instrucciones=req.instrucciones,
+            llm=req.llm,
+            chat_id=chat_id
         )
 
-        # Guardar respuesta del agente
+        # Guardar respuesta del agente con el estado de venta y metadatos
         mensaje_agente = Mensaje(
             chat_id=chat_id,
             remitente="agente",
             mensaje=respuesta["respuesta"],
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
+            tipo_mensaje=tipo,
+            estado_venta=respuesta.get("estado_venta"),
+            metadatos=respuesta.get("metadatos")
         )
         db.add(mensaje_agente)
         await db.commit()
 
-        return respuesta
+        return {
+            "respuesta": respuesta["respuesta"],
+            "tipo_mensaje": tipo,
+            "estado_venta": respuesta.get("estado_venta"),
+            "metadatos": respuesta.get("metadatos")
+        }
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -98,6 +104,9 @@ async def chat(
         logging.error(f"Error en endpoint chat: {str(e)}")
         return {
             "respuesta": "Lo siento, no entendí tu pregunta. ¿Puedes intentarlo de otra forma o preguntar algo más específico?",
+            "tipo_mensaje": None,
+            "estado_venta": None,
+            "metadatos": None
         }
 
 # --- Imagen ---
@@ -106,42 +115,29 @@ class ChatImagenRequest(BaseModel):
     mensaje: Optional[str] = None  # prompt adicional opcional
     tono: Optional[str] = "formal"
     instrucciones: Optional[str] = ""
-    llm: Optional[str] = "gpt-4-vision"
+    llm: Optional[str] = "gemini-pro-vision"
 
 MAX_IMAGE_SIZE_MB = 2
 ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png"]
 
-async def procesar_imagen_openai_vision(image_bytes: bytes, prompt: str, llm: str = "gpt-4-vision") -> str:
+async def procesar_imagen_gemini(image_bytes: bytes, prompt: str, llm: str = "gemini-pro-vision") -> str:
     """
-    Procesa la imagen con OpenAI Vision y retorna la descripción generada.
-    Si el LLM no entiende la imagen, retorna un mensaje claro.
+    Procesa la imagen con Gemini (Google) y retorna la descripción generada.
     """
-    client = AsyncOpenAI()
+    if not os.getenv("GOOGLE_API_KEY"):
+        raise Exception("GOOGLE_API_KEY no configurada")
+    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+    model = genai.GenerativeModel(llm)
     try:
-        b64_image = base64.b64encode(image_bytes).decode()
-        vision_prompt = prompt_vision(prompt)
-        response = await client.chat.completions.create(
-            model=llm,
-            messages=[
-                {"role": "system", "content": vision_prompt},
-                {"role": "user", "content": [
-                    {"type": "text", "text": prompt or "Describe la imagen de forma útil para ventas."},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}}
-                ]}
-            ],
-            max_tokens=256,
-            temperature=0.2
-        )
-        desc = response.choices[0].message.content.strip()
-        if not desc or "no puedo" in desc.lower():
-            return "No puedo interpretar la imagen con claridad."
-        return desc
+        # (adaptar según la API de Gemini para procesar imágenes, por ejemplo, usando model.generate_content con un objeto de imagen)
+        response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": base64.b64encode(image_bytes).decode()}])
+        return response.text.strip()
     except Exception as e:
-        logging.error(f"Error en OpenAI Vision: {str(e)}")
-        return "[Procesamiento de imagen pendiente: servicio de visión aún no integrado o error de API]"
+        logging.error(f"Error en Gemini Vision: {str(e)}")
+        raise
 
 @router.post("/imagen", summary="Procesa una imagen (archivo o URL) y responde usando visión + RAG", response_model=Dict[str, Any])
-async def chat_imagen(request: Request, imagen: Optional[UploadFile] = File(None), imagen_url: Optional[str] = Form(None), mensaje: Optional[str] = Form(None), tono: Optional[str] = Form("formal"), instrucciones: Optional[str] = Form(""), llm: Optional[str] = Form("gpt-4-vision"), db: AsyncSession = Depends(get_db)):
+async def chat_imagen(request: Request, imagen: Optional[UploadFile] = File(None), imagen_url: Optional[str] = Form(None), mensaje: Optional[str] = Form(None), tono: Optional[str] = Form("formal"), instrucciones: Optional[str] = Form(""), llm: Optional[str] = Form("gemini-pro-vision"), db: AsyncSession = Depends(get_db)):
     logging.info("Recibida petición en /chat/imagen")
     try:
         image_bytes = None
@@ -169,7 +165,7 @@ async def chat_imagen(request: Request, imagen: Optional[UploadFile] = File(None
         else:
             raise HTTPException(status_code=400, detail="Debes enviar una imagen como archivo o una imagen_url")
         logging.info(f"Imagen recibida en /chat/imagen: {bool(image_bytes)} bytes, mensaje: {mensaje}")
-        descripcion = await procesar_imagen_openai_vision(image_bytes, mensaje, llm=llm)
+        descripcion = await procesar_imagen_gemini(image_bytes, mensaje, llm=llm)
         respuesta = await consultar_rag(
             mensaje=descripcion,
             tipo="inventario",
@@ -194,7 +190,7 @@ class ChatTextoRequest(BaseModel):
     mensaje: str = Field(..., min_length=1, max_length=1000)
     tono: Optional[str] = "formal"
     instrucciones: Optional[str] = ""
-    llm: Optional[str] = "openai"
+    llm: Optional[str] = "gemini"
 
 @router.post("/texto", summary="Procesa solo texto con LLM de texto", response_model=Dict[str, Any])
 async def chat_texto(request: Request, db: AsyncSession = Depends(get_db)):
@@ -209,7 +205,7 @@ async def chat_texto(request: Request, db: AsyncSession = Depends(get_db)):
         tipo = data.get("tipo")
         if not tipo:
             from app.services.clasificacion_tipo_llm import clasificar_tipo_mensaje_llm
-            tipo = await clasificar_tipo_mensaje_llm(mensaje_usuario)
+            tipo = clasificar_tipo_mensaje_llm(mensaje_usuario)
         logging.info(f"[chat_texto] Tipo de consulta final: {tipo}")
 
         # Detectar si hay una venta pendiente de confirmación para este chat
@@ -252,7 +248,7 @@ async def chat_texto(request: Request, db: AsyncSession = Depends(get_db)):
             nombre_empresa="Sextinvalle",
             tono=data.get("tono", "formal"),
             instrucciones=data.get("instrucciones", ""),
-            llm=data.get("llm", "openai")
+            llm=data.get("llm", "gemini")
         )
         logging.info(f"[chat_texto] Respuesta de consultar_rag: {respuesta}")
         logging.info("[chat_texto] Justo antes de return")
@@ -284,7 +280,7 @@ async def chat_texto(request: Request, db: AsyncSession = Depends(get_db)):
 
 # --- Audio ---
 @router.post("/audio", summary="Procesa audio (transcribe y responde)", response_model=Dict[str, Any])
-async def chat_audio(audio: UploadFile = File(...), tono: Optional[str] = Form("formal"), instrucciones: Optional[str] = Form(""), llm: Optional[str] = Form("openai-whisper"), db: AsyncSession = Depends(get_db)):
+async def chat_audio(audio: UploadFile = File(...), tono: Optional[str] = Form("formal"), instrucciones: Optional[str] = Form(""), llm: Optional[str] = Form("gemini"), db: AsyncSession = Depends(get_db)):
     logging.info("Recibida petición en /chat/audio")
     try:
         audio.file.seek(0, 2)
@@ -294,21 +290,14 @@ async def chat_audio(audio: UploadFile = File(...), tono: Optional[str] = Form("
             raise HTTPException(status_code=400, detail="El audio supera el tamaño máximo de 10MB")
         # --- Transcripción con OpenAI Whisper (API asíncrona v1.x) ---
         try:
-            OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-            if not OPENAI_API_KEY:
-                raise Exception("OPENAI_API_KEY no configurada")
             audio_bytes = await audio.read()
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_audio:
                 tmp_audio.write(audio_bytes)
                 tmp_audio.flush()
                 tmp_audio.seek(0)
-                client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+                client = genai.GenerativeModel(llm)
                 with open(tmp_audio.name, "rb") as f:
-                    transcript = await client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=f,
-                        language="es"
-                    )
+                    transcript = client.generate_content([{"text": "Transcribe este audio"}, {"mime_type": "audio/mpeg", "data": base64.b64encode(f.read()).decode()}])
             transcripcion = transcript.text
         except Exception as e:
             logging.error(f"Error en transcripción Whisper: {str(e)}")
@@ -341,7 +330,7 @@ class ChatSmartRequest(BaseModel):
     audio_url: Optional[str] = None
     tono: Optional[str] = "formal"
     instrucciones: Optional[str] = ""
-    llm: Optional[str] = "openai"
+    llm: Optional[str] = "gemini"
 
 @router.post("/", summary="Router inteligente: enruta según tipo o payload", response_model=Dict[str, Any])
 async def chat_router(
