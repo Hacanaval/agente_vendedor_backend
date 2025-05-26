@@ -1,6 +1,6 @@
 # Agente Vendedor SaaS Backend
 
-Backend profesional, modular y multi-tenant para un Agente Vendedor conversacional orientado a PYMES. Permite gestionar inventario, ventas, clientes y consultas inteligentes vía chat, integrando RAG (Retrieval-Augmented Generation) con LLMs (OpenAI por defecto) y arquitectura lista para multiempresa.
+Backend profesional, modular y multi-tenant para un Agente Vendedor conversacional orientado a PYMES. Permite gestionar inventario, ventas, clientes y consultas inteligentes vía chat, integrando RAG (Retrieval-Augmented Generation) con Gemini (Google) y arquitectura lista para multiempresa.
 
 ## 🚀 Características Principales
 
@@ -33,12 +33,16 @@ app/
 │   ├── mensaje.py   # Historial de chat
 │   └── logs.py      # Logs y auditoría
 ├── services/        # Lógica de negocio
+│   ├── llm.py       # Wrapper para LLMs
+│   ├── llm_client.py # Orquestador de LLMs
 │   ├── rag.py       # Pipeline RAG
-│   ├── retrieval/   # Búsqueda semántica
-│   │   ├── faiss_retriever.py
-│   │   └── pinecone_retriever.py
-│   ├── llm_client.py # Integración con LLMs
-│   └── prompts.py   # Templates de prompts
+│   ├── prompts.py   # Templates de prompts
+│   ├── clasificacion_tipo_llm.py # Clasificación de mensajes
+│   └── retrieval/   # Búsqueda semántica
+│       ├── retriever_factory.py
+│       ├── faiss_retriever.py
+│       ├── pinecone_retriever.py
+│       └── embeddings.py
 └── core/           # Configuración
     └── database.py # Conexión DB y sesiones
 ```
@@ -92,15 +96,13 @@ Para escalar horizontalmente:
      ```python
      async def generar_respuesta(
          prompt: str,
-         llm: str = "openai",
+         llm: str = "gemini",
          **kwargs
      ) -> str:
-         if llm == "openai":
-             return await generar_respuesta_openai(prompt, **kwargs)
-         elif llm == "gemini":
+         if llm == "gemini":
              return await generar_respuesta_gemini(prompt, **kwargs)
-         elif llm == "cohere":
-             return await generar_respuesta_cohere(prompt, **kwargs)
+         else:
+             raise ValueError(f"LLM no soportado: {llm}")
      ```
 
 #### 2. Escalamiento Vertical
@@ -152,10 +154,10 @@ Para escalar horizontalmente:
 
 ```env
 # API Keys
-GOOGLE_API_KEY=your_google_api_key_here
+GOOGLE_API_KEY=tu_clave_google
 
 # Base de datos
-DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/dbname
+DATABASE_URL=postgresql+asyncpg://usuario:password@localhost:5432/tu_db
 
 # Configuración de seguridad
 SECRET_KEY=your_secret_key_here
@@ -279,7 +281,7 @@ Desarrollar una plataforma SaaS robusta para que pequeñas y medianas empresas g
 - **FastAPI** (backend async, modular, tipado)
 - **PostgreSQL** + **SQLAlchemy async** (ORM, relaciones, transacciones)
 - **FAISS** (vector DB local, retrieval semántico)
-- **OpenAI** (embeddings y LLM, arquitectura pluggable para otros modelos)
+- **Gemini** (Google) (embeddings y LLM, arquitectura pluggable para otros modelos)
 - **JWT** (autenticación y roles, desactivado en modo MVP)
 - **Pandas** (procesamiento de CSV)
 - **python-telegram-bot** (integración Telegram)
@@ -367,7 +369,7 @@ alembic/          # Migraciones de base de datos
 
 ## 📝 Personalización y extensibilidad
 - **Prompts**: Edita los prompts en `app/services/prompts.py` para cambiar el tono, reglas anti-alucinación, cierre de venta, etc.
-- **LLM**: Cambia el modelo de lenguaje (OpenAI, Gemini, Cohere, local, etc.) en la configuración.
+- **LLM**: Cambia el modelo de lenguaje (Gemini, Cohere, local, etc.) en la configuración.
 - **Retrieval**: Arquitectura lista para migrar de FAISS a Pinecone u otros.
 - **Multi-tenant**: TODOs y comentarios en el código para reactivar seguridad y multiempresa.
 - **Integración de canales**: Listo para WhatsApp, Telegram, web y otros.
@@ -391,7 +393,7 @@ alembic/          # Migraciones de base de datos
    ```
 4. Configura variables de entorno en `.env`:
    ```env
-   OPENAI_API_KEY=tu_clave_openai
+   GOOGLE_API_KEY=tu_clave_google
    DATABASE_URL=postgresql+asyncpg://usuario:password@localhost:5432/tu_db
    # ...otros parámetros opcionales
    ```
