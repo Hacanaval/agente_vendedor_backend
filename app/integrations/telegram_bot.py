@@ -67,7 +67,8 @@ async def consultar_backend_imagen(image_path: str, user_id: int) -> str:
                 
             if response.status_code == 200:
                 data = response.json()
-                return f"Descripción: {data.get('descripcion_imagen', '')}\n\nRespuesta: {data.get('respuesta_agente', '')}"
+                # Solo retornar la respuesta del agente, sin mostrar la descripción técnica
+                return data.get('respuesta', 'No se pudo obtener respuesta.')
             else:
                 return "Error al procesar la imagen. Intenta de nuevo."
                 
@@ -89,7 +90,8 @@ async def consultar_backend_audio(audio_path: str, user_id: int) -> str:
                 
             if response.status_code == 200:
                 data = response.json()
-                return f"Transcripción: {data.get('transcripcion', '')}\n\nRespuesta: {data.get('respuesta', '')}"
+                # Solo retornar la respuesta del agente, sin mostrar la transcripción
+                return data.get('respuesta', 'No se pudo obtener respuesta.')
             else:
                 return "Error al procesar el audio. Intenta de nuevo."
                 
