@@ -279,11 +279,15 @@ async def consultar_rag(
                         }
                         logging.info(f"Producto agregado al pedido: {producto_detectado['nombre']} x{cantidad_detectada}")
                         
-                        # Personalizar respuesta para productos adicionales
+                        # Generar respuesta natural basada en el contexto
                         if any(palabra in mensaje.lower() for palabra in ["también", "además", "agregar", "añadir"]):
-                            respuesta = f"✅ Perfecto, he agregado {cantidad_detectada} {producto_detectado['nombre']} a tu pedido.\n\n"
+                            respuesta = f"Perfecto, he agregado {cantidad_detectada} {producto_detectado['nombre']} a tu pedido.\n\n"
                             respuesta += f"Tu pedido ahora incluye {len(resultado_pedido['productos'])} productos por un total de ${resultado_pedido['total']:,.0f}.\n\n"
-                            respuesta += "¿Deseas agregar algo más o proceder con el pedido?"
+                            respuesta += "¿Te gustaría agregar algo más o procedemos con este pedido?"
+                        else:
+                            # Primera vez agregando producto
+                            respuesta = f"Excelente, he agregado {cantidad_detectada} {producto_detectado['nombre']} a tu pedido por un total de ${resultado_pedido['total']:,.0f}.\n\n"
+                            respuesta += "¿Deseas agregar algún otro producto o procedemos con este pedido?"
                         
                         # IMPORTANTE: Retornar inmediatamente para evitar que se sobrescriba la respuesta
                         return {
@@ -317,7 +321,7 @@ async def consultar_rag(
                             "barrio": "barrio",
                             "indicaciones_adicionales": "indicaciones adicionales"
                         }
-                        respuesta = f"✅ Perfecto, procederemos con tu pedido.\n\nPara procesar tu pedido, necesito algunos datos. Empecemos con tu {campo_nombres.get(primer_campo, primer_campo)}."
+                        respuesta = f"Perfecto, procederemos con tu pedido.\n\nPara coordinar la entrega, necesito algunos datos. ¿Podrías proporcionarme tu {campo_nombres.get(primer_campo, primer_campo)}?"
                         
                         return {
                             "respuesta": respuesta,
@@ -668,8 +672,12 @@ async def detectar_campo_cliente(mensaje: str, campos_faltantes: list):
     mensaje_lower = mensaje.lower().strip()
     
     # Excluir mensajes de confirmación/negación que no son datos del cliente
-    confirmaciones = ["sí", "si", "confirmo", "acepto", "está bien", "perfecto", "ok", "vale", "no", "nada más", "solo eso", "dame", "por favor"]
+    confirmaciones = ["sí", "si", "confirmo", "acepto", "está bien", "perfecto", "ok", "vale", "no", "nada más", "solo eso", "dame", "por favor", "correcto", "exacto", "así es", "claro"]
     if any(conf in mensaje_lower for conf in confirmaciones):
+        return None
+    
+    # Excluir mensajes muy cortos que claramente son confirmaciones
+    if len(mensaje.strip()) <= 8 and mensaje_lower in ["sí", "si", "ok", "vale", "bien", "correcto", "exacto", "claro"]:
         return None
     
     # Excluir mensajes que contienen números y palabras de productos (claramente no son datos del cliente)
