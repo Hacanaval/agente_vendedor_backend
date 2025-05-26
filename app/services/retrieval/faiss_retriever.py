@@ -8,16 +8,20 @@ import logging
 import asyncio
 
 class FAISSRetriever:
-    def __init__(self, empresa_id: int, db):
-        self.empresa_id = empresa_id
+    def __init__(self, db):
         self.db = db
         self.index = None
         self.id_map = []  # Mapea posición en FAISS a producto_id
 
     async def build_index(self):
         try:
-            # Cargar productos de la empresa y crear embeddings
-            result = await self.db.execute(select(Producto).where(Producto.empresa_id == self.empresa_id))
+            # Cargar todos los productos activos y con stock > 0
+            result = await self.db.execute(
+                select(Producto).where(
+                    Producto.activo == True,
+                    Producto.stock > 0
+                )
+            )
             productos = result.scalars().all()
             if not productos:
                 self.index = None

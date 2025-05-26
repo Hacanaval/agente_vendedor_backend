@@ -11,10 +11,9 @@ import logging
 async def consultar_rag(
     mensaje: str,
     tipo: str,
-    empresa_id: int,
     db,
     nombre_agente: str = "Agente",
-    nombre_empresa: str = "Empresa",
+    nombre_empresa: str = "Sextinvalle",  # <-- Unificado
     tono: str = "formal",
     instrucciones: str = "",
     usuario_id: int = None,
@@ -26,20 +25,33 @@ async def consultar_rag(
     """
     try:
         # 1. Retrieval según tipo
-        logging.info(f"[consultar_rag] Antes de retrieval para tipo={tipo}")
-        if tipo == "inventario":
-            contexto = await retrieval_inventario(mensaje, empresa_id, db)
+        logging.info(f"[consultar_rag] Tipo de consulta recibido: {tipo}")
+        if tipo in ("inventario", "venta"):
+            contexto = await retrieval_inventario(mensaje, db)
+            if not contexto or contexto.strip() == "" or contexto.startswith("No se encontraron") or contexto.startswith("No hay productos"):
+                logging.info("[consultar_rag] No hay productos disponibles, agregando instrucción especial al prompt")
+                system_prompt, user_prompt = prompt_ventas(
+                    contexto=contexto,
+                    mensaje=mensaje,
+                    nombre_agente=nombre_agente,
+                    nombre_empresa=nombre_empresa,
+                    tono=tono,
+                    instrucciones=instrucciones + "\nIMPORTANTE: Si no hay productos en el inventario, responde claramente que no tenemos productos disponibles para esa consulta. No inventes ni sugieras productos fuera del inventario."
+                )
+            else:
+                system_prompt, user_prompt = prompt_ventas(
+                    contexto=contexto,
+                    mensaje=mensaje,
+                    nombre_agente=nombre_agente,
+                    nombre_empresa=nombre_empresa,
+                    tono=tono,
+                    instrucciones=instrucciones
+                )
             logging.info(f"[consultar_rag] Contexto inventario obtenido: {contexto[:200]}...")
-            system_prompt, user_prompt = prompt_ventas(
-                contexto=contexto,
-                mensaje=mensaje,
-                nombre_agente=nombre_agente,
-                nombre_empresa=nombre_empresa,
-                tono=tono,
-                instrucciones=instrucciones
-            )
         elif tipo == "contexto":
-            contexto = await retrieval_contexto_empresa(mensaje, empresa_id, db)
+            contexto = await retrieval_contexto_empresa(mensaje, db)
+            if not contexto or contexto.strip() == "":
+                contexto = "No se encontró información relevante sobre la empresa."
             logging.info(f"[consultar_rag] Contexto empresa obtenido: {contexto[:200]}...")
             system_prompt, user_prompt = prompt_empresa(
                 contexto=contexto,
@@ -50,7 +62,16 @@ async def consultar_rag(
                 instrucciones=instrucciones
             )
         else:
-            raise ValueError(f"Tipo de consulta no soportado: {tipo}")
+            logging.warning(f"[consultar_rag] Tipo de consulta no soportado: {tipo}")
+            return {
+                "respuesta": "Lo siento, no entendí tu pregunta. ¿Puedes reformularla o ser más específico?",
+                "contexto": "",
+                "prompt": {}
+            }
+
+        # Log completo de prompts enviados al LLM
+        logging.info(f"[consultar_rag] PROMPT SYSTEM:\n{system_prompt}")
+        logging.info(f"[consultar_rag] PROMPT USER:\n{user_prompt}")
 
         logging.info(f"[consultar_rag] Antes de llamada al LLM (generar_respuesta)")
         respuesta = await generar_respuesta(
@@ -61,7 +82,6 @@ async def consultar_rag(
         )
         logging.info(f"[consultar_rag] Respuesta LLM: {respuesta}")
 
-        # TODO: Restaurar logs y multiempresa en producción
         return {
             "respuesta": respuesta,
             "contexto": contexto,
@@ -72,42 +92,48 @@ async def consultar_rag(
         }
     except Exception as e:
         logging.error(f"[consultar_rag] Error en consulta RAG: {str(e)}")
-        raise
+        return {
+            "respuesta": "Tuvimos un problema procesando tu pregunta. Por favor, intenta de nuevo o pregunta algo diferente.",
+            "contexto": "",
+            "prompt": {}
+        }
 
-async def retrieval_inventario(mensaje: str, empresa_id: int, db):
+async def retrieval_inventario(mensaje: str, db):
     """
     Recupera productos relevantes usando búsqueda semántica.
     """
     try:
-        retriever = get_retriever(empresa_id, db)
+        retriever = get_retriever(db)
         await retriever.sync_with_db()  # Reconstruye el índice si es necesario
         ids = await retriever.search(mensaje, top_k=5)
         if not ids:
+            logging.info("[retrieval_inventario] No se encontraron productos relevantes para la búsqueda")
             return "No se encontraron productos relevantes."
         
         result = await db.execute(
             select(Producto).where(
                 Producto.id.in_(ids),
-                Producto.empresa_id == empresa_id,
-                Producto.activo == True
+                Producto.activo == True,
+                Producto.stock > 0
             )
         )
         productos = result.scalars().all()
-        
         if not productos:
+            logging.info("[retrieval_inventario] No hay productos disponibles con stock > 0")
             return "No hay productos disponibles actualmente."
-            
+        
         contexto = [
             f"{p.nombre}: {p.descripcion} (Precio: ${p.precio:,.2f}, Stock: {p.stock})"
             for p in productos
         ]
-        return "\n".join(contexto)
-        
+        contexto_str = "\n".join(contexto)
+        logging.info(f"[retrieval_inventario] Contexto encontrado: {contexto_str[:200]}...")
+        return contexto_str
     except Exception as e:
         logging.error(f"Error en retrieval_inventario: {str(e)}")
         return "Error al buscar productos. Por favor, intenta de nuevo."
 
-async def retrieval_contexto_empresa(mensaje: str, empresa_id: int, db):
+async def retrieval_contexto_empresa(mensaje: str, db):
     """
     Recupera contexto de la empresa.
     Por ahora usa un contexto estático, pero se puede extender para cargar dinámicamente.

@@ -17,6 +17,7 @@ from sqlalchemy import insert, select, or_
 from datetime import datetime
 import openai
 from openai import AsyncOpenAI
+import base64
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -26,6 +27,7 @@ class ChatRequest(BaseModel):
     tono: str = Field(default="formal", pattern="^(formal|informal|amigable|profesional)$")
     instrucciones: str = Field(default="", max_length=500)
     llm: str = Field(default="openai", pattern="^(openai|gemini|cohere|local)$")
+    chat_id: Optional[str] = Field(default=None)
 
 @router.post("/", response_model=Dict[str, Any])
 async def chat(
@@ -35,48 +37,68 @@ async def chat(
     """
     Endpoint de chat tipo RAG: responde consultas de inventario, venta o contexto según tipo.
     Si 'tipo' no viene, se clasifica automáticamente usando LLM.
-    
-    - tipo: "inventario" (consulta productos), "contexto" (consulta info empresa) o "venta" (consulta info venta)
-    - tono: "formal", "informal", "amigable", "profesional"
-    - instrucciones: instrucciones adicionales para el LLM
-    - llm: modelo de lenguaje a usar (por ahora solo "openai")
+    Mantiene historial de conversación usando chat_id.
     """
     try:
-        # TODO: Volver a usar empresa_id dinámico y autenticación en multiempresa
-        # empresa = await db.get(Empresa, 1)
-        # if not empresa:
-        #     raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
-        nombre_empresa = "Empresa Demo"
+        nombre_empresa = "Sextinvalle"
+        chat_id = req.chat_id or "default"
 
-        # Clasificación automática si no viene tipo
+        # Guardar mensaje del usuario
+        mensaje_usuario = Mensaje(
+            chat_id=chat_id,
+            remitente="usuario",
+            mensaje=req.mensaje,
+            timestamp=datetime.now()
+        )
+        db.add(mensaje_usuario)
+        await db.flush()
+
+        # Obtener historial de conversación
+        result = await db.execute(
+            select(Mensaje)
+            .where(Mensaje.chat_id == chat_id)
+            .order_by(Mensaje.timestamp.desc())
+            .limit(5)
+        )
+        historial = result.scalars().all()[::-1]  # Los 5 más recientes, en orden cronológico
+        historial_str = "\n".join([f"{m.remitente}: {m.mensaje}" for m in historial])
+        logging.info(f"[chat] Historial de conversación: {historial_str[:200]}...")
+
         tipo = req.tipo
         if not tipo:
             tipo = await clasificar_tipo_mensaje_llm(req.mensaje)
+        logging.info(f"[chat] Tipo de consulta final: {tipo}")
 
-        # Consultar RAG
         respuesta = await consultar_rag(
             mensaje=req.mensaje,
             tipo=tipo,
-            empresa_id=1,  # TODO: Volver a usar empresa_id dinámico en multiempresa
             db=db,
             nombre_agente="Agente Vendedor",
             nombre_empresa=nombre_empresa,
             tono=req.tono,
-            instrucciones=req.instrucciones,
-            usuario_id=None,
+            instrucciones=f"Ten en cuenta el siguiente historial de la conversación:\n{historial_str}\n\n{req.instrucciones}",
             llm=req.llm
         )
-        
+
+        # Guardar respuesta del agente
+        mensaje_agente = Mensaje(
+            chat_id=chat_id,
+            remitente="agente",
+            mensaje=respuesta["respuesta"],
+            timestamp=datetime.now()
+        )
+        db.add(mensaje_agente)
+        await db.commit()
+
         return respuesta
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logging.error(f"Error en endpoint chat: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Error interno del servidor al procesar la consulta"
-        )
+        return {
+            "respuesta": "Lo siento, no entendí tu pregunta. ¿Puedes intentarlo de otra forma o preguntar algo más específico?",
+        }
 
 # --- Imagen ---
 class ChatImagenRequest(BaseModel):
@@ -96,7 +118,6 @@ async def procesar_imagen_openai_vision(image_bytes: bytes, prompt: str, llm: st
     """
     client = AsyncOpenAI()
     try:
-        # OpenAI Vision espera la imagen como base64
         b64_image = base64.b64encode(image_bytes).decode()
         vision_prompt = prompt_vision(prompt)
         response = await client.chat.completions.create(
@@ -123,7 +144,6 @@ async def procesar_imagen_openai_vision(image_bytes: bytes, prompt: str, llm: st
 async def chat_imagen(request: Request, imagen: Optional[UploadFile] = File(None), imagen_url: Optional[str] = Form(None), mensaje: Optional[str] = Form(None), tono: Optional[str] = Form("formal"), instrucciones: Optional[str] = Form(""), llm: Optional[str] = Form("gpt-4-vision"), db: AsyncSession = Depends(get_db)):
     logging.info("Recibida petición en /chat/imagen")
     try:
-        # 1. Obtener bytes de la imagen
         image_bytes = None
         if imagen is not None:
             if imagen.content_type not in ALLOWED_IMAGE_TYPES:
@@ -153,13 +173,11 @@ async def chat_imagen(request: Request, imagen: Optional[UploadFile] = File(None
         respuesta = await consultar_rag(
             mensaje=descripcion,
             tipo="inventario",
-            empresa_id=1,
             db=db,
             nombre_agente="Agente Vendedor",
             nombre_empresa="Sextinvalle",
             tono=tono,
             instrucciones=instrucciones,
-            usuario_id=None,
             llm=llm
         )
         logging.info(f"Respuesta generada en /chat/imagen: {respuesta}")
@@ -169,7 +187,7 @@ async def chat_imagen(request: Request, imagen: Optional[UploadFile] = File(None
         }
     except Exception as e:
         logging.error(f"Error en /chat/imagen: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno en /chat/imagen")
+        return {"descripcion_imagen": "Esta función aún no está disponible.", "respuesta_agente": "Esta función aún no está disponible."}
 
 # --- Texto ---
 class ChatTextoRequest(BaseModel):
@@ -186,6 +204,14 @@ async def chat_texto(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         chat_id = str(data.get("chat_id", "pruebas"))
         mensaje_usuario = data["mensaje"]
+
+        # NUEVO: Permitir 'tipo' explícito, o clasificar si no viene
+        tipo = data.get("tipo")
+        if not tipo:
+            from app.services.clasificacion_tipo_llm import clasificar_tipo_mensaje_llm
+            tipo = await clasificar_tipo_mensaje_llm(mensaje_usuario)
+        logging.info(f"[chat_texto] Tipo de consulta final: {tipo}")
+
         # Detectar si hay una venta pendiente de confirmación para este chat
         result = await db.execute(
             select(Mensaje).where(
@@ -196,9 +222,6 @@ async def chat_texto(request: Request, db: AsyncSession = Depends(get_db)):
         venta_pendiente = result.scalars().first()
         confirmaciones = ["si", "sí", "confirmo", "ok", "dale", "de acuerdo", "acepto", "listo"]
         if venta_pendiente and any(c in mensaje_usuario.lower() for c in confirmaciones):
-            # Registrar la venta automáticamente
-            # Aquí deberías extraer producto/cantidad de la venta pendiente (puedes guardar más info en el mensaje o contexto)
-            # Para demo, solo cerramos la venta
             await db.execute(
                 insert(Mensaje).values(
                     chat_id=chat_id,
@@ -208,10 +231,10 @@ async def chat_texto(request: Request, db: AsyncSession = Depends(get_db)):
                     estado_venta="cerrada"
                 )
             )
-            # Actualizar estado de la venta pendiente
             venta_pendiente.estado_venta = "cerrada"
             await db.commit()
             return {"respuesta": "¡Listo! Pedido registrado. Pronto te contactaremos para coordinar la entrega."}
+
         # Persistir mensaje de usuario
         await db.execute(insert(Mensaje).values(
             chat_id=chat_id,
@@ -220,22 +243,22 @@ async def chat_texto(request: Request, db: AsyncSession = Depends(get_db)):
             timestamp=datetime.utcnow(),
             estado_venta=None
         ))
+
         respuesta = await consultar_rag(
             mensaje=mensaje_usuario,
-            tipo="inventario",
-            empresa_id=1,
+            tipo=tipo,
             db=db,
             nombre_agente="Agente Vendedor",
             nombre_empresa="Sextinvalle",
             tono=data.get("tono", "formal"),
             instrucciones=data.get("instrucciones", ""),
-            usuario_id=None,
             llm=data.get("llm", "openai")
         )
         logging.info(f"[chat_texto] Respuesta de consultar_rag: {respuesta}")
         logging.info("[chat_texto] Justo antes de return")
         logging.info(f"[chat_texto] Mensaje del usuario: {mensaje_usuario}")
         logging.info(f"[chat_texto] Respuesta generada: {respuesta.get('respuesta', '')}")
+
         # Si la respuesta contiene una invitación a confirmar, marcamos venta pendiente
         if any(palabra in respuesta.get("respuesta", "").lower() for palabra in ["¿deseas", "quieres confirmar", "te gustaría agregarlo", "confirmar pedido"]):
             await db.execute(insert(Mensaje).values(
@@ -257,7 +280,7 @@ async def chat_texto(request: Request, db: AsyncSession = Depends(get_db)):
         return {"respuesta": respuesta.get("respuesta", "")}
     except Exception as e:
         logging.error(f"[chat_texto] Error en /chat/texto: {str(e)}")
-        return {"respuesta": "[Respuesta dummy por error interno]"}
+        return {"respuesta": "Lo siento, no entendí tu pregunta. ¿Puedes intentarlo de otra forma o preguntar algo más específico?"}
 
 # --- Audio ---
 @router.post("/audio", summary="Procesa audio (transcribe y responde)", response_model=Dict[str, Any])
@@ -289,18 +312,16 @@ async def chat_audio(audio: UploadFile = File(...), tono: Optional[str] = Form("
             transcripcion = transcript.text
         except Exception as e:
             logging.error(f"Error en transcripción Whisper: {str(e)}")
-            transcripcion = "[Transcripción pendiente: servicio de audio aún no integrado o error de API]"
+            transcripcion = "Esta función aún no está disponible."
         audio_prompt = prompt_audio(transcripcion)
         respuesta = await consultar_rag(
             mensaje=audio_prompt,
             tipo="contexto",
-            empresa_id=1,
             db=db,
             nombre_agente="Agente Vendedor",
             nombre_empresa="Sextinvalle",
             tono=tono,
             instrucciones=instrucciones,
-            usuario_id=None,
             llm=llm
         )
         logging.info(f"Respuesta generada en /chat/audio: {respuesta}")
@@ -327,20 +348,8 @@ async def chat_router(
     req: ChatSmartRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Router inteligente que enruta a /chat/texto, /chat/imagen o /chat/audio según el tipo o el payload recibido.
-    - Ejemplo de request:
-      curl -X POST http://localhost:8000/chat -H "Content-Type: application/json" -d '{"tipo": "texto", "mensaje": "Hola"}'
-    - Puedes forzar el tipo y el LLM con los campos 'tipo' y 'llm'.
-    """
-    # TODO: Volver a usar empresa_id dinámico y autenticación en multiempresa
-    # empresa = await db.get(Empresa, 1)
-    # if not empresa:
-    #     raise HTTPException(status_code=404, detail="Empresa no encontrada (id=1)")
-
     tipo = req.tipo
     if not tipo:
-        # Autodetectar según payload
         if req.imagen_url:
             tipo = "imagen"
         elif req.audio_url:
@@ -358,7 +367,6 @@ async def chat_router(
             empresa_id=1  # TODO: Volver a usar empresa_id dinámico en multiempresa
         ), db)
     elif tipo == "imagen":
-        # Redirigir a /chat/imagen (solo soporta imagen_url aquí)
         return await chat_imagen(
             request=None,
             imagen=None,
@@ -371,16 +379,12 @@ async def chat_router(
             db=db
         )
     elif tipo == "audio":
-        # Redirigir a /chat/audio (solo soporta audio_url aquí, integración futura)
         return {"respuesta": "Procesamiento de audio por URL no implementado aún."}
     else:
         raise HTTPException(status_code=400, detail="Tipo de input no soportado")
 
 @router.get("/historial/{chat_id}", summary="Historial de mensajes de un chat", response_model=List[dict])
 async def historial_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
-    """
-    Devuelve el historial de mensajes de un chat_id (usuario/cliente), ordenados por fecha ascendente.
-    """
     result = await db.execute(
         select(Mensaje).where(Mensaje.chat_id == chat_id).order_by(Mensaje.timestamp.asc())
     )

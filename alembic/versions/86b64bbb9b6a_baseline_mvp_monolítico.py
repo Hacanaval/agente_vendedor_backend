@@ -1,8 +1,8 @@
-"""add chat_id to venta
+"""baseline MVP monolítico
 
-Revision ID: 6c439728a8c6
-Revises: fb8b13d16229
-Create Date: 2025-05-24 17:31:24.195891
+Revision ID: 86b64bbb9b6a
+Revises: 
+Create Date: 2025-05-24 18:20:48.227273
 
 """
 from typing import Sequence, Union
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '6c439728a8c6'
-down_revision: Union[str, None] = 'fb8b13d16229'
+revision: str = '86b64bbb9b6a'
+down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

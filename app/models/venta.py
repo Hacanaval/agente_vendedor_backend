@@ -1,8 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Float, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
-
-Base = declarative_base()
+from app.core.database import Base
 
 class Venta(Base):
     __tablename__ = "venta"

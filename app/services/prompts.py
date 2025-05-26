@@ -7,7 +7,7 @@ def validar_tono(tono: str) -> str:
         return "amigable"
     return tono
 
-def truncar_contexto(contexto: str, max_chars: int = 800) -> str:
+def truncar_contexto(contexto: str, max_chars: int = 2000) -> str:
     return contexto[:max_chars] + ("..." if len(contexto) > max_chars else "")
 
 def prompt_ventas(
