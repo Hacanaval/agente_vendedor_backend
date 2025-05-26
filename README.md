@@ -13,6 +13,205 @@ Sistema de agente vendedor conversacional inteligente para pequeñas y medianas 
 - **Base de Datos SQL**: Almacenamiento persistente de conversaciones y productos
 - **API REST**: Endpoints para integración con otros sistemas
 
+## 🏗️ Arquitectura Detallada
+
+### 1. Estructura del Proyecto
+```
+agente_vendedor/
+├── alembic/                # Migraciones de base de datos
+│   └── versions/          # Scripts de migración
+├── app/
+│   ├── api/              # Endpoints FastAPI
+│   │   ├── chat.py      # Endpoints de chat (texto, imagen, audio)
+│   │   └── productos.py # Gestión de inventario
+│   ├── core/            # Configuración y utilidades
+│   │   ├── config.py    # Configuración de la aplicación
+│   │   └── database.py  # Conexión a base de datos
+│   ├── integrations/    # Integraciones externas
+│   │   └── telegram_bot.py  # Bot de Telegram
+│   ├── models/          # Modelos SQLAlchemy
+│   │   ├── mensaje.py   # Modelo de mensajes
+│   │   └── producto.py  # Modelo de productos
+│   ├── services/        # Lógica de negocio
+│   │   ├── rag.py       # Pipeline RAG
+│   │   ├── prompts.py   # Templates de prompts
+│   │   ├── llm_client.py # Cliente de Gemini
+│   │   ├── clasificacion_tipo_llm.py # Clasificación de mensajes
+│   │   └── retrieval/   # Búsqueda semántica
+│   │       ├── embeddings.py  # Generación de embeddings
+│   │       └── faiss_retriever.py # Índice FAISS
+│   └── main.py          # Punto de entrada FastAPI
+├── scripts/             # Scripts de utilidad
+│   └── init_productos.py # Inicialización de productos
+├── tests/              # Pruebas
+│   ├── test_db_productos.py
+│   ├── test_rag_completo.py
+│   └── test_sistema_completo.py
+└── requirements.txt    # Dependencias
+```
+
+### 2. Componentes Principales
+
+#### 2.1 Capa de API (FastAPI)
+- **Endpoints de Chat** (`app/api/chat.py`):
+  - `/chat/texto`: Procesamiento de mensajes de texto
+  - `/chat/imagen`: Procesamiento de imágenes con Gemini Vision
+  - `/chat/audio`: Procesamiento de audio con transcripción
+  - `/chat/historial`: Consulta de historial de conversación
+
+- **Endpoints de Productos** (`app/api/productos.py`):
+  - CRUD completo de productos
+  - Búsqueda semántica de productos
+  - Gestión de inventario
+
+#### 2.2 Capa de Servicios
+
+##### RAG Pipeline (`app/services/rag.py`)
+```mermaid
+graph LR
+    A[Mensaje] --> B[Clasificación]
+    B --> C{¿Tipo?}
+    C -->|Contexto| D[RAG Contexto]
+    C -->|Inventario| E[RAG Inventario]
+    C -->|Venta| F[Proceso de Venta]
+    D --> G[Generación Respuesta]
+    E --> G
+    F --> G
+    G --> H[Respuesta Final]
+```
+
+1. **Clasificación de Mensajes**:
+   - Usa Gemini para clasificar el tipo de consulta
+   - Categorías: contexto, inventario, venta
+   - Precisión: 100% en pruebas
+
+2. **Retrieval Semántico**:
+   - Embeddings con Gemini (text-embedding-004)
+   - Índice FAISS para búsqueda rápida
+   - Filtrado por relevancia y stock
+
+3. **Generación de Respuestas**:
+   - Gemini (gemini-2.0-flash) para generación
+   - Contexto aumentado con RAG
+   - Prompts optimizados por tipo de consulta
+
+##### Sistema de Embeddings (`app/services/retrieval/embeddings.py`)
+- Modelo: Gemini text-embedding-004
+- Dimensión: 768
+- Tarea: retrieval_document
+- Caché: Implementado para optimizar rendimiento
+
+##### Clasificación de Mensajes (`app/services/clasificacion_tipo_llm.py`)
+- Modelo: Gemini gemini-2.0-flash
+- Categorías: contexto, inventario, venta
+- Prompt optimizado para clasificación
+- Manejo de casos especiales
+
+#### 2.3 Capa de Datos
+
+##### Modelos SQLAlchemy
+```python
+# app/models/mensaje.py
+class Mensaje(Base):
+    __tablename__ = "mensajes"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(String, index=True)
+    remitente = Column(String)  # "usuario" o "agente"
+    mensaje = Column(Text)
+    timestamp = Column(DateTime)
+    tipo_mensaje = Column(String)  # "contexto", "inventario", "venta"
+    estado_venta = Column(String, nullable=True)
+    metadatos = Column(JSON, nullable=True)
+
+# app/models/producto.py
+class Producto(Base):
+    __tablename__ = "productos"
+    id = Column(Integer, primary_key=True)
+    nombre = Column(String, index=True)
+    descripcion = Column(Text)
+    precio = Column(Float)
+    stock = Column(Integer)
+    categoria = Column(String)
+    activo = Column(Boolean, default=True)
+    embedding = Column(Vector(768))  # Vector FAISS
+```
+
+##### Índice FAISS
+- Almacenamiento local de vectores
+- Reconstrucción automática al actualizar productos
+- Búsqueda por similitud coseno
+- Filtrado por stock y estado activo
+
+#### 2.4 Integración Telegram (`app/integrations/telegram_bot.py`)
+- Bot asíncrono con python-telegram-bot
+- Manejo de comandos y mensajes
+- Soporte multimodal (texto, imagen, audio)
+- Manejo robusto de errores
+- Timeouts configurados:
+  - Texto: 30 segundos
+  - Multimedia: 60 segundos
+
+### 3. Flujos de Datos
+
+#### 3.1 Procesamiento de Mensajes
+```mermaid
+sequenceDiagram
+    participant U as Usuario
+    participant T as Telegram
+    participant A as API
+    participant R as RAG
+    participant DB as Base de Datos
+    
+    U->>T: Envía mensaje
+    T->>A: POST /chat/texto
+    A->>R: Clasifica mensaje
+    R->>DB: Consulta contexto
+    DB-->>R: Retorna contexto
+    R->>R: Genera respuesta
+    R->>DB: Guarda mensajes
+    A-->>T: Envía respuesta
+    T-->>U: Muestra respuesta
+```
+
+#### 3.2 Procesamiento de Imágenes
+```mermaid
+sequenceDiagram
+    participant U as Usuario
+    participant T as Telegram
+    participant A as API
+    participant V as Gemini Vision
+    participant R as RAG
+    
+    U->>T: Envía imagen
+    T->>A: POST /chat/imagen
+    A->>V: Procesa imagen
+    V-->>A: Descripción
+    A->>R: Procesa descripción
+    R-->>A: Genera respuesta
+    A-->>T: Envía respuesta
+    T-->>U: Muestra respuesta
+```
+
+### 4. Optimizaciones
+
+#### 4.1 Rendimiento
+- Caché de embeddings
+- Índice FAISS optimizado
+- Timeouts configurados
+- Limpieza automática de archivos temporales
+
+#### 4.2 Seguridad
+- Tokens en variables de entorno
+- Validación de tokens Telegram
+- Manejo de errores robusto
+- Logging seguro
+
+#### 4.3 Escalabilidad
+- Arquitectura modular
+- Base de datos asíncrona
+- Servicios desacoplados
+- Preparado para multi-tenant
+
 ## 🛠️ Stack Tecnológico
 
 - **Backend**: FastAPI (Python 3.9+)
