@@ -13,6 +13,8 @@ Backend completo para chatbot vendedor conversacional con RAG, memoria y procesa
 - **🖼️ Procesamiento de imágenes**: Análisis con Gemini Vision
 - **🎵 Transcripción de audio**: Whisper de OpenAI
 - **📊 Dashboard de administración**: Métricas y estadísticas completas
+- **👥 Sistema de clientes**: Gestión completa con historial de compras y RAG especializado
+- **📊 Exportación CSV**: Descarga completa de datos con filtros avanzados
 
 ### 🔧 **Arquitectura**
 - **FastAPI**: Framework web moderno y rápido
@@ -42,6 +44,23 @@ Backend completo para chatbot vendedor conversacional con RAG, memoria y procesa
 - `GET /productos/` - Lista de productos
 - `GET /ventas/` - Lista de ventas
 - `GET /pedidos/` - Gestión de pedidos
+
+### 👥 **Clientes**
+- `GET /clientes/` - Lista de clientes con búsqueda
+- `GET /clientes/{cedula}` - Información detallada del cliente
+- `GET /clientes/{cedula}/historial` - Historial de compras
+- `GET /clientes/{cedula}/estadisticas` - Estadísticas del cliente
+- `GET /clientes/top/compradores` - Top clientes por valor
+- `POST /clientes/{cedula}/consulta` - Consulta RAG sobre historial
+- `POST /clientes/buscar` - Búsqueda avanzada de clientes
+
+### 📊 **Exportación CSV** (NUEVO)
+- `GET /exportar/inventario` - Exportar inventario completo
+- `GET /exportar/clientes` - Exportar base de clientes
+- `GET /exportar/ventas` - Exportar ventas con detalles
+- `GET /exportar/conversaciones-rag` - Exportar logs de conversaciones
+- `GET /exportar/reporte-completo` - Reporte estadístico general
+- `GET /exportar/info` - Información de datos disponibles
 
 ## 🛠️ **Instalación y Configuración**
 

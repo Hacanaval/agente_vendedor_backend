@@ -9,6 +9,7 @@ from app.models.mensaje import Mensaje
 from app.services.prompts import prompt_ventas, prompt_empresa
 from app.services.contextos import CONTEXTO_EMPRESA_SEXTINVALLE
 from app.services.pedidos import PedidoManager
+from app.services.rag_clientes import RAGClientes
 
 async def consultar_rag(
     mensaje: str,
@@ -81,6 +82,66 @@ async def consultar_rag(
                         "tipo_mensaje": "venta",
                         "metadatos": None
                     }
+
+        # NUEVO: Detectar consultas de historial de clientes
+        deteccion_cliente = await RAGClientes.detectar_consulta_cliente(mensaje)
+        
+        if deteccion_cliente["es_consulta_cliente"]:
+            logging.info(f"[consultar_rag] Detectada consulta de cliente: {deteccion_cliente}")
+            
+            if deteccion_cliente["cedula_detectada"]:
+                # Consulta específica con cédula
+                cedula = deteccion_cliente["cedula_detectada"]
+                
+                if deteccion_cliente["tipo_consulta"] == "estadisticas":
+                    resultado = await RAGClientes.obtener_estadisticas_cliente(cedula, db, llm)
+                else:
+                    resultado = await RAGClientes.consultar_historial_cliente(cedula, mensaje, db, llm)
+                
+                return {
+                    "respuesta": resultado["respuesta"],
+                    "estado_venta": None,
+                    "tipo_mensaje": "cliente",
+                    "metadatos": {
+                        "tipo_consulta_cliente": deteccion_cliente["tipo_consulta"],
+                        "cedula": cedula,
+                        "encontrado": resultado.get("encontrado", False)
+                    }
+                }
+            
+            elif deteccion_cliente["tipo_consulta"] == "busqueda":
+                # Buscar cliente por nombre
+                # Extraer nombre del mensaje
+                palabras = mensaje.split()
+                nombre_busqueda = " ".join([p for p in palabras if not p.isdigit() and p.lower() not in ["buscar", "cliente", "encontrar", "información", "de", "del"]])
+                
+                if nombre_busqueda:
+                    resultado = await RAGClientes.buscar_cliente_por_nombre(nombre_busqueda, db)
+                    
+                    return {
+                        "respuesta": resultado["respuesta"],
+                        "estado_venta": None,
+                        "tipo_mensaje": "cliente",
+                        "metadatos": {
+                            "tipo_consulta_cliente": "busqueda",
+                            "termino_busqueda": nombre_busqueda,
+                            "clientes_encontrados": resultado.get("total", 0)
+                        }
+                    }
+                else:
+                    return {
+                        "respuesta": "Para buscar un cliente, proporciona su nombre o cédula. Ejemplo: 'Buscar cliente Juan Pérez' o 'Cliente 12345678'",
+                        "estado_venta": None,
+                        "tipo_mensaje": "cliente",
+                        "metadatos": {"error": "falta_termino_busqueda"}
+                    }
+            else:
+                return {
+                    "respuesta": "Para consultar información de un cliente, proporciona su cédula. Ejemplo: 'Historial del cliente 12345678' o 'Estadísticas del cliente 12345678'",
+                    "estado_venta": None,
+                    "tipo_mensaje": "cliente",
+                    "metadatos": {"error": "falta_cedula"}
+                }
 
         # Retrieval según tipo de consulta
         logging.info(f"[consultar_rag] Tipo de consulta recibido: {tipo}")

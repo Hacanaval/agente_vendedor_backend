@@ -4,6 +4,7 @@ from sqlalchemy.future import select
 from app.models.mensaje import Mensaje
 from app.models.venta import Venta
 from app.models.producto import Producto
+from app.services.cliente_manager import ClienteManager
 import json
 import logging
 from datetime import datetime
@@ -321,9 +322,22 @@ class PedidoManager:
             if campos_faltantes:
                 return {"exito": False, "error": "Faltan datos del cliente", "campos_faltantes": campos_faltantes}
             
+            # NUEVO: Crear o actualizar cliente
+            datos_cliente = metadatos.get("datos_cliente", {})
+            cedula = datos_cliente.get("cedula")
+            
+            cliente_resultado = None
+            if cedula:
+                cliente_resultado = await ClienteManager.crear_o_actualizar_cliente(datos_cliente, db)
+                if not cliente_resultado["exito"]:
+                    logging.warning(f"No se pudo crear/actualizar cliente {cedula}: {cliente_resultado.get('error')}")
+                else:
+                    logging.info(f"Cliente {cliente_resultado['accion']}: {cedula} - {datos_cliente.get('nombre_completo')}")
+            
             # Crear ventas para cada producto del pedido
             productos_pedido = metadatos.get("productos", [])
             ventas_creadas = []
+            total_valor_ventas = 0
             
             for producto_info in productos_pedido:
                 try:
@@ -351,8 +365,9 @@ class PedidoManager:
                             total=producto.precio * cantidad,
                             chat_id=chat_id,
                             estado="completada",
+                            cliente_cedula=cedula,  # NUEVO: Asociar venta con cliente
                             detalle={
-                                "datos_cliente": metadatos.get("datos_cliente", {}),
+                                "datos_cliente": datos_cliente,
                                 "pedido_id": mensaje.id
                             }
                         )
@@ -364,6 +379,8 @@ class PedidoManager:
                         await db.flush()
                         await db.refresh(venta)
                         
+                        total_valor_ventas += venta.total
+                        
                         ventas_creadas.append({
                             "venta_id": venta.id,
                             "producto": nombre_producto,
@@ -371,7 +388,16 @@ class PedidoManager:
                             "total": venta.total
                         })
                         
-                        logging.info(f"Venta creada: ID {venta.id} para producto {nombre_producto}")
+                        # NUEVO: Registrar venta en el historial del cliente
+                        if cedula and cliente_resultado and cliente_resultado["exito"]:
+                            await ClienteManager.registrar_venta_cliente(
+                                cedula=cedula,
+                                venta_id=venta.id,
+                                valor_venta=venta.total,
+                                db=db
+                            )
+                        
+                        logging.info(f"Venta creada: ID {venta.id} para producto {nombre_producto} - Cliente: {cedula}")
                     else:
                         logging.warning(f"No se pudo crear venta para {nombre_producto}: producto no encontrado o stock insuficiente")
                         

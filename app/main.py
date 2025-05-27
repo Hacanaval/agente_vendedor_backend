@@ -10,6 +10,8 @@ from app.api.logs import router as logs_router
 from app.api.chat import router as chat_router
 from app.api.pedidos import router as pedidos_router
 from app.api.admin import router as admin_router
+from app.api.clientes import router as clientes_router
+from app.api.exportar import router as exportar_router
 
 # Instancia FastAPI
 app = FastAPI(
@@ -35,6 +37,8 @@ app.include_router(logs_router)
 app.include_router(chat_router)
 app.include_router(pedidos_router)
 app.include_router(admin_router)
+app.include_router(clientes_router)
+app.include_router(exportar_router)
 
 # Healthcheck o raíz
 @app.get("/")
