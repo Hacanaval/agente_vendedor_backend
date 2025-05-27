@@ -1,10 +1,10 @@
 from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from app.core.database import Base
+from app.core.base_class import Base
 
 class Mensaje(Base):
-    __tablename__ = "mensaje"
+    __tablename__ = "mensajes"
 
     id = Column(Integer, primary_key=True, index=True)
     chat_id = Column(String, index=True, nullable=False)

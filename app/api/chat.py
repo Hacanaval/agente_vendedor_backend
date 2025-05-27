@@ -9,6 +9,7 @@ from app.services.clasificacion_tipo_llm import clasificar_tipo_mensaje_llm
 from app.services.llm_client import generar_respuesta
 from app.services.prompts import prompt_vision, prompt_audio
 from app.models.mensaje import Mensaje
+from app.services.chat_control_service import ChatControlService
 from sqlalchemy import insert, select
 from datetime import datetime
 import aiohttp
@@ -52,6 +53,31 @@ async def chat_texto(
     """
     try:
         chat_id = req.chat_id or "default"
+        
+        # 🔥 VERIFICAR SI LA IA DEBE RESPONDER (CONTROL DE CHATBOT)
+        debe_responder, razon = await ChatControlService.debe_responder_ia(db, chat_id)
+        if not debe_responder:
+            # Guardar mensaje del usuario pero no responder con IA
+            mensaje_usuario = Mensaje(
+                chat_id=chat_id,
+                remitente="usuario",
+                mensaje=req.mensaje.strip(),
+                timestamp=datetime.now(),
+                tipo_mensaje="contexto"
+            )
+            db.add(mensaje_usuario)
+            await db.commit()
+            
+            return {
+                "respuesta": f"🔴 {razon}. Este chat está siendo atendido por un humano.",
+                "tipo_mensaje": "sistema",
+                "estado_venta": "ia_desactivada",
+                "metadatos": {
+                    "ia_desactivada": True,
+                    "razon": razon,
+                    "chat_id": chat_id
+                }
+            }
         
         # Validación mejorada de mensajes vacíos o inválidos
         mensaje_limpio = req.mensaje.strip()

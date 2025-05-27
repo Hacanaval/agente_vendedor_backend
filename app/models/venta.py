@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Float, JSON, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from app.core.database import Base
+from app.core.base_class import Base
 
 class Venta(Base):
     """
@@ -10,7 +10,7 @@ class Venta(Base):
     Registra cada venta individual con información completa del cliente,
     producto vendido y detalles de la transacción.
     """
-    __tablename__ = "venta"
+    __tablename__ = "ventas"
     
     id = Column(Integer, primary_key=True, index=True, comment="ID único de la venta")
     producto_id = Column(Integer, nullable=False, index=True, comment="ID del producto vendido")

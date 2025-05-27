@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
 
 # Importa los routers
 from app.api.auth import router as auth_router
@@ -12,6 +13,10 @@ from app.api.pedidos import router as pedidos_router
 from app.api.admin import router as admin_router
 from app.api.clientes import router as clientes_router
 from app.api.exportar import router as exportar_router
+from app.api.chat_control import router as chat_control_router
+
+# Importa la función para crear tablas
+from app.core.database import create_tables
 
 # Instancia FastAPI
 app = FastAPI(
@@ -19,6 +24,15 @@ app = FastAPI(
     description="API backend para chatbot vendedor multiempresa, RAG y memoria",
     version="1.0.0"
 )
+
+# Evento de inicio para crear tablas
+@app.on_event("startup")
+async def startup_event():
+    await create_tables()
+    # Carga inicial de productos (opcional, solo si es necesario)
+    # from app.services.producto_service import cargar_productos_iniciales
+    # loop = asyncio.get_event_loop()
+    # await loop.run_in_executor(None, cargar_productos_iniciales) # Ejecutar en hilo separado si es largo
 
 # Middleware CORS (habilita acceso desde frontend local u otros dominios)
 app.add_middleware(
@@ -39,6 +53,7 @@ app.include_router(pedidos_router)
 app.include_router(admin_router)
 app.include_router(clientes_router)
 app.include_router(exportar_router)
+app.include_router(chat_control_router)
 
 # Healthcheck o raíz
 @app.get("/")

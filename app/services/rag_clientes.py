@@ -195,6 +195,7 @@ INFORMACIÓN DEL CLIENTE:
 - Nombre: {cliente['nombre_completo']}
 - Cédula: {cliente['cedula']}
 - Teléfono: {cliente['telefono']}
+- Correo: {cliente.get('correo', 'No registrado')}
 - Dirección: {cliente['direccion']}, {cliente['barrio']}
 - Cliente desde: {cliente['fecha_registro'][:10] if cliente['fecha_registro'] else 'N/A'}
 - Última compra: {cliente['fecha_ultima_compra'][:10] if cliente['fecha_ultima_compra'] else 'N/A'}
@@ -283,18 +284,53 @@ INSTRUCCIONES:
         """
         mensaje_lower = mensaje.lower()
         
-        # Patrones para detectar consultas de clientes
+        # Patrones para detectar consultas de clientes (MÁS ESPECÍFICOS)
         patrones_cliente = [
-            "historial de", "compras de", "cliente", "cédula", "ha comprado",
-            "última compra", "cuántas veces", "qué productos", "estadísticas de",
-            "información del cliente", "datos del cliente"
+            "historial del cliente", "compras del cliente", "cliente con cédula", 
+            "cliente ha comprado", "última compra del cliente", "cuántas veces ha comprado",
+            "qué ha comprado el cliente", "productos comprados por el cliente", 
+            "estadísticas del cliente", "buscar cliente", "información del cliente", 
+            "datos del cliente", "encontrar cliente", "perfil del cliente",
+            "cliente número", "cédula del cliente"
         ]
         
-        # Patrones para detectar cédulas
+        # Patrones para detectar cédulas (solo si hay contexto de cliente)
         import re
         cedula_match = re.search(r'\b\d{6,12}\b', mensaje)
         
-        es_consulta_cliente = any(patron in mensaje_lower for patron in patrones_cliente)
+        # Solo es consulta de cliente si tiene patrón específico O cédula + contexto
+        # ADEMÁS debe tener contexto explícito de cliente (no productos en general)
+        tiene_patron_cliente = any(patron in mensaje_lower for patron in patrones_cliente)
+        tiene_cedula_con_contexto = (cedula_match and any(palabra in mensaje_lower for palabra in ["cliente", "cédula", "historial", "compras"]))
+        
+        # Excluir consultas que claramente son sobre productos en general  
+        # MEJORADO: Detectar mejor las consultas de inventario y excluir explícitamente
+        consultas_inventario_claras = [
+            "qué productos tienen", "que productos tienen", "qué tienen", "que tienen",
+            "productos disponibles", "catálogo", "inventario", "mostrar productos",
+            "ver productos", "qué venden", "que venden", "lista de productos",
+            "qué productos tienen disponibles", "que productos tienen disponibles",
+            "productos tienen disponibles", "tienen disponibles", "qué hay disponible",
+            "que hay disponible", "mostrar inventario", "ver inventario", 
+            "catálogo de productos", "productos en stock", "stock disponible",
+            "qué manejan", "que manejan", "qué ofrecen", "que ofrecen"
+        ]
+        
+        es_consulta_inventario_clara = any(patron in mensaje_lower for patron in consultas_inventario_claras)
+        
+        es_consulta_cliente = (tiene_patron_cliente or tiene_cedula_con_contexto) and not es_consulta_inventario_clara
+        
+        # DEBUGGING
+        import logging
+        logging.info(f"[RAGClientes] ANÁLISIS DETALLADO:")
+        logging.info(f"[RAGClientes] Mensaje original: '{mensaje}'")
+        logging.info(f"[RAGClientes] Mensaje lower: '{mensaje_lower}'")
+        logging.info(f"[RAGClientes] Patrones cliente encontrados: {[p for p in patrones_cliente if p in mensaje_lower]}")
+        logging.info(f"[RAGClientes] Patrones inventario encontrados: {[p for p in consultas_inventario_claras if p in mensaje_lower]}")
+        logging.info(f"[RAGClientes] Tiene patrón cliente: {tiene_patron_cliente}")
+        logging.info(f"[RAGClientes] Tiene cédula con contexto: {tiene_cedula_con_contexto}")
+        logging.info(f"[RAGClientes] Es consulta inventario clara: {es_consulta_inventario_clara}")
+        logging.info(f"[RAGClientes] RESULTADO FINAL es_consulta_cliente: {es_consulta_cliente}")
         
         return {
             "es_consulta_cliente": es_consulta_cliente,

@@ -84,6 +84,8 @@ async def consultar_rag(
                     }
 
         # NUEVO: Detectar consultas de historial de clientes
+        # TEMPORALMENTE DESACTIVADO COMPLETAMENTE para testing
+        """
         deteccion_cliente = await RAGClientes.detectar_consulta_cliente(mensaje)
         
         if deteccion_cliente["es_consulta_cliente"]:
@@ -142,6 +144,7 @@ async def consultar_rag(
                     "tipo_mensaje": "cliente",
                     "metadatos": {"error": "falta_cedula"}
                 }
+        """
 
         # Retrieval según tipo de consulta
         logging.info(f"[consultar_rag] Tipo de consulta recibido: {tipo}")
@@ -161,9 +164,10 @@ async def consultar_rag(
                     info_pedido += f"Datos faltantes: {', '.join(estado_pedido['campos_faltantes'])}\n"
             
             instrucciones_extra = instrucciones + (
-                "\nIMPORTANTE:\n1. Si no hay productos en el inventario, responde claramente que no tenemos productos disponibles para esa consulta.\n"
-                "2. No inventes ni sugieras productos fuera del inventario.\n"
-                f"3. Historial reciente de la conversación:\n{historial_contexto}\n"
+                "\nIMPORTANTE:\n1. Si el contexto empieza con 'PRODUCTOS_DISPONIBLES:', presenta SIEMPRE toda esa lista de productos al cliente de manera organizada y atractiva.\n"
+                "2. Si no hay productos específicos para una búsqueda, responde claramente que no tenemos productos disponibles para esa consulta particular.\n"
+                "3. No inventes ni sugieras productos fuera del inventario proporcionado.\n"
+                f"4. Historial reciente de la conversación:\n{historial_contexto}\n"
                 f"{info_pedido}"
             )
             system_prompt, user_prompt = prompt_ventas(
@@ -251,6 +255,7 @@ async def consultar_rag(
                             "nombre_completo": "nombre",
                             "cedula": "cédula",
                             "telefono": "teléfono",
+                            "correo": "correo electrónico",
                             "direccion": "dirección",
                             "barrio": "barrio",
                             "indicaciones_adicionales": "indicaciones adicionales"
@@ -378,6 +383,7 @@ async def consultar_rag(
                             "nombre_completo": "nombre completo",
                             "cedula": "cédula",
                             "telefono": "teléfono",
+                            "correo": "correo electrónico",
                             "direccion": "dirección",
                             "barrio": "barrio",
                             "indicaciones_adicionales": "indicaciones adicionales"
@@ -418,164 +424,255 @@ async def consultar_rag(
 
 async def retrieval_inventario(mensaje: str, db):
     """
-    Recupera productos relevantes usando búsqueda semántica (FAISS o Pinecone) con fallback a búsqueda por texto.
-    Solo productos activos y con stock > 0.
-    NO muestra stock exacto ni lista completa de productos.
+    Recupera productos relevantes usando búsqueda híbrida mejorada.
+    Maneja consultas generales, específicas y múltiples productos.
     """
     try:
-        # Primero intentar búsqueda semántica
-        retriever = get_retriever(db)
-        await retriever.sync_with_db()
-        ids = await retriever.search(mensaje, top_k=3)
+        logging.info(f"[retrieval_inventario] Procesando consulta: '{mensaje}'")
         
-        productos_encontrados = []
+        # 1. DETECTAR CONSULTAS GENERALES (mostrar todo)
+        consultas_generales = [
+            "qué tienen", "que tienen", "productos disponibles", "qué productos", 
+            "que productos", "catálogo", "inventario", "lista", "tienen disponible",
+            "qué venden", "que venden", "mostrar productos", "ver productos",
+            "disponibles", "ofrecen", "manejan", "venden", "productos",
+            "todo lo que tienen", "que hay", "que tiene", "mostrar todo",
+            "ver todo", "todo disponible", "que ofrecen", "que manejan"
+        ]
         
-        if ids:
-            result = await db.execute(
-                select(Producto).where(
-                    Producto.id.in_(ids),
-                    Producto.activo == True,
-                    Producto.stock > 0
-                )
-            )
-            productos_encontrados = result.scalars().all()
+        mensaje_lower = mensaje.lower()
+        es_consulta_general = any(patron in mensaje_lower for patron in consultas_generales)
         
-        # FALLBACK: Si no encuentra productos relevantes o los productos no son relevantes, usar búsqueda por texto
-        productos_relevantes = False
-        if productos_encontrados:
-            # Verificar si los productos encontrados son realmente relevantes
-            palabras_mensaje = mensaje.lower().split()
-            for producto in productos_encontrados:
-                nombre_producto = producto.nombre.lower()
-                # Si alguna palabra del mensaje está en el nombre del producto, es relevante
-                if any(palabra in nombre_producto for palabra in palabras_mensaje if len(palabra) > 2):
-                    productos_relevantes = True
-                    break
+        # DEBUGGING detección
+        logging.info(f"[retrieval_inventario] Mensaje: '{mensaje}' | Lower: '{mensaje_lower}' | Es general: {es_consulta_general}")
+        if not es_consulta_general:
+            logging.info(f"[retrieval_inventario] Patrones evaluados: {[patron for patron in consultas_generales if patron in mensaje_lower]}")
         
-        # MEJORA: Si encontramos productos relevantes pero pocos, buscar productos similares adicionales
-        if productos_relevantes and len(productos_encontrados) < 3:
-            # Buscar productos similares adicionales
-            palabras_busqueda = mensaje.lower().split()
-            palabras_relevantes = [p for p in palabras_busqueda if len(p) > 2]
+        if es_consulta_general:
+            logging.info(f"[retrieval_inventario] DETECTADA CONSULTA GENERAL: '{mensaje}'")
             
-            if palabras_relevantes:
-                condiciones_adicionales = []
-                for palabra in palabras_relevantes:
-                    condiciones_adicionales.append(Producto.nombre.ilike(f"%{palabra}%"))
-                    condiciones_adicionales.append(Producto.descripcion.ilike(f"%{palabra}%"))
-                    
-                    # Buscar versión singular/plural
-                    if palabra.endswith('es') and len(palabra) > 4:
-                        singular = palabra[:-2]
-                        condiciones_adicionales.append(Producto.nombre.ilike(f"%{singular}%"))
-                        condiciones_adicionales.append(Producto.descripcion.ilike(f"%{singular}%"))
-                    elif palabra.endswith('s') and len(palabra) > 3 and not palabra.endswith('es'):
-                        singular = palabra[:-1]
-                        condiciones_adicionales.append(Producto.nombre.ilike(f"%{singular}%"))
-                        condiciones_adicionales.append(Producto.descripcion.ilike(f"%{singular}%"))
-                
-                from sqlalchemy import or_
-                result_adicional = await db.execute(
+            # Obtener TODOS los productos activos de la base de datos
+            try:
+                result = await db.execute(
                     select(Producto).where(
-                        or_(*condiciones_adicionales),
                         Producto.activo == True,
                         Producto.stock > 0
-                    ).limit(5)
+                    ).order_by(Producto.nombre)
                 )
-                productos_adicionales = result_adicional.scalars().all()
+                todos_productos = result.scalars().all()
                 
-                # Combinar productos sin duplicados
-                ids_existentes = {p.id for p in productos_encontrados}
-                for p in productos_adicionales:
-                    if p.id not in ids_existentes:
-                        productos_encontrados.append(p)
-                        if len(productos_encontrados) >= 5:  # Límite máximo
-                            break
-        
-        if not productos_encontrados or not productos_relevantes:
-            logging.info("[retrieval_inventario] Fallback a búsqueda por texto")
-            palabras_busqueda = mensaje.lower().split()
-            
-            # Filtrar palabras relevantes (más de 2 caracteres)
-            palabras_relevantes = [p for p in palabras_busqueda if len(p) > 2]
-            
-            if palabras_relevantes:
-                # Buscar productos que contengan alguna de las palabras (incluyendo singulares/plurales)
-                condiciones = []
-                for palabra in palabras_relevantes:
-                    # Buscar la palabra tal como está
-                    condiciones.append(Producto.nombre.ilike(f"%{palabra}%"))
-                    condiciones.append(Producto.descripcion.ilike(f"%{palabra}%"))
+                if not todos_productos:
+                    return "Lo siento, actualmente no tenemos productos disponibles en nuestro inventario."
+                
+                # Agrupar productos por categorías
+                categorias = {}
+                for producto in todos_productos:
+                    # Determinar categoría basada en el nombre del producto
+                    nombre_lower = producto.nombre.lower()
+                    if "extintor" in nombre_lower:
+                        categoria = "🧯 **Extintores**"
+                    elif "casco" in nombre_lower or "bota" in nombre_lower or "guante" in nombre_lower or "chaleco" in nombre_lower:
+                        categoria = "🦺 **Equipos de Protección Personal**"
+                    elif "linterna" in nombre_lower or "señal" in nombre_lower or "detector" in nombre_lower:
+                        categoria = "🔦 **Señalización y Seguridad**"
+                    elif "botiquín" in nombre_lower or "candado" in nombre_lower or "manta" in nombre_lower:
+                        categoria = "🛡️ **Seguridad y Emergencias**"
+                    elif "alicate" in nombre_lower or "martillo" in nombre_lower or "taladro" in nombre_lower:
+                        categoria = "🔧 **Herramientas**"
+                    elif "televisor" in nombre_lower:
+                        categoria = "📺 **Equipos Audiovisuales**"
+                    else:
+                        categoria = "📦 **Otros Productos**"
                     
-                    # Buscar versión singular/plural con reglas específicas para español
-                    if palabra.endswith('es') and len(palabra) > 4:
-                        # Plurales que terminan en 'es' -> quitar 'es'
-                        singular = palabra[:-2]
-                        condiciones.append(Producto.nombre.ilike(f"%{singular}%"))
-                        condiciones.append(Producto.descripcion.ilike(f"%{singular}%"))
-                    elif palabra.endswith('s') and len(palabra) > 3 and not palabra.endswith('es'):
-                        # Plurales que terminan en 's' -> quitar 's'
-                        singular = palabra[:-1]
-                        condiciones.append(Producto.nombre.ilike(f"%{singular}%"))
-                        condiciones.append(Producto.descripcion.ilike(f"%{singular}%"))
-                    elif not palabra.endswith('s'):
-                        # Si no termina en 's', probar con 's' y 'es'
-                        plural_s = palabra + 's'
-                        plural_es = palabra + 'es'
-                        condiciones.append(Producto.nombre.ilike(f"%{plural_s}%"))
-                        condiciones.append(Producto.descripcion.ilike(f"%{plural_s}%"))
-                        condiciones.append(Producto.nombre.ilike(f"%{plural_es}%"))
-                        condiciones.append(Producto.descripcion.ilike(f"%{plural_es}%"))
+                    if categoria not in categorias:
+                        categorias[categoria] = []
+                    
+                    disponibilidad = "✅ Disponible" if producto.stock > 10 else "⚠️ Stock limitado"
+                    categorias[categoria].append(f"• {producto.nombre} - ${producto.precio:,.0f} ({disponibilidad})")
                 
+                # Construir respuesta formateada
+                respuesta_partes = ["PRODUCTOS_DISPONIBLES: Catálogo completo de Sextinvalle:\n"]
+                
+                for categoria, productos_cat in categorias.items():
+                    respuesta_partes.append(f"{categoria}:")
+                    respuesta_partes.extend(productos_cat)
+                    respuesta_partes.append("")  # Línea en blanco entre categorías
+                
+                return "\n".join(respuesta_partes)
+                
+            except Exception as e:
+                logging.error(f"[retrieval_inventario] Error consultando productos para catálogo general: {e}")
+                return "Error al obtener el catálogo de productos. Por favor, intenta de nuevo."
+        
+        # 2. BÚSQUEDA ESPECÍFICA DE PRODUCTOS
+        # Extraer palabras clave del mensaje
+        palabras_busqueda = mensaje_lower.split()
+        
+        # Filtrar palabras irrelevantes y mantener solo las importantes
+        palabras_irrelevantes = {
+            "tienen", "tienes", "hay", "venden", "vendes", "necesito", "quiero", 
+            "busco", "me", "un", "una", "unos", "unas", "el", "la", "los", "las",
+            "de", "del", "en", "con", "para", "por", "que", "qué", "como", "cómo",
+            "dónde", "donde", "cuánto", "cuanto", "cuál", "cual", "cuáles", "cuales",
+            "favor", "por", "ayuda", "ayudar", "información", "info", "ser", "más",
+            "puede", "pueden", "podría", "podrías", "decir", "decirme", "saber",
+            "hola", "buenos", "días", "tardes", "noches", "gracias"
+        }
+        
+        # Limpiar signos de puntuación de las palabras
+        import re
+        palabras_limpias = []
+        for palabra in palabras_busqueda:
+            # Remover signos de puntuación
+            palabra_limpia = re.sub(r'[¿?¡!.,;:()"]', '', palabra)
+            if len(palabra_limpia) > 2 and palabra_limpia not in palabras_irrelevantes:
+                palabras_limpias.append(palabra_limpia)
+        
+        palabras_relevantes = palabras_limpias
+        
+        logging.info(f"[retrieval_inventario] Palabras relevantes extraídas: {palabras_relevantes}")
+        
+        if not palabras_relevantes:
+            return "¿Podrías ser más específico sobre qué producto estás buscando? Por ejemplo: 'extintores', 'cascos de seguridad', etc."
+        
+        # 3. BÚSQUEDA HÍBRIDA: Semántica + Texto
+        productos_encontrados = []
+        
+        # 3.1 Búsqueda semántica con FAISS/Pinecone
+        try:
+            retriever = get_retriever(db)
+            await retriever.sync_with_db()
+            
+            # Crear consulta optimizada para búsqueda semántica
+            consulta_semantica = " ".join(palabras_relevantes)
+            ids_semanticos = await retriever.search(consulta_semantica, top_k=5)
+            
+            if ids_semanticos:
+                result = await db.execute(
+                    select(Producto).where(
+                        Producto.id.in_(ids_semanticos),
+                        Producto.activo == True,
+                        Producto.stock > 0
+                    )
+                )
+                productos_semanticos = result.scalars().all()
+                
+                # Validar relevancia de resultados semánticos
+                for producto in productos_semanticos:
+                    nombre_producto = producto.nombre.lower()
+                    descripcion_producto = (producto.descripcion or "").lower()
+                    
+                    # Un producto es relevante si contiene alguna palabra clave
+                    es_relevante = any(
+                        palabra in nombre_producto or palabra in descripcion_producto
+                        for palabra in palabras_relevantes
+                    )
+                    
+                    if es_relevante:
+                        productos_encontrados.append(producto)
+                        
+                logging.info(f"[retrieval_inventario] Búsqueda semántica: {len(productos_semanticos)} encontrados, {len(productos_encontrados)} relevantes")
+        
+        except Exception as e:
+            logging.warning(f"[retrieval_inventario] Búsqueda semántica falló: {e}")
+        
+        # 3.2 Búsqueda por texto como respaldo/complemento
+        if len(productos_encontrados) < 3:
+            condiciones_texto = []
+            
+            for palabra in palabras_relevantes:
+                # Búsqueda exacta
+                condiciones_texto.append(Producto.nombre.ilike(f"%{palabra}%"))
+                condiciones_texto.append(Producto.descripcion.ilike(f"%{palabra}%"))
+                
+                # Manejo de plurales/singulares en español
+                if palabra.endswith('es') and len(palabra) > 4:
+                    # extintores -> extintor
+                    singular = palabra[:-2]
+                    condiciones_texto.append(Producto.nombre.ilike(f"%{singular}%"))
+                    condiciones_texto.append(Producto.descripcion.ilike(f"%{singular}%"))
+                elif palabra.endswith('s') and len(palabra) > 3 and not palabra.endswith('es'):
+                    # cascos -> casco
+                    singular = palabra[:-1]  
+                    condiciones_texto.append(Producto.nombre.ilike(f"%{singular}%"))
+                    condiciones_texto.append(Producto.descripcion.ilike(f"%{singular}%"))
+                elif not palabra.endswith('s'):
+                    # extintor -> extintores
+                    plural_s = palabra + 's'
+                    plural_es = palabra + 'es'
+                    condiciones_texto.append(Producto.nombre.ilike(f"%{plural_s}%"))
+                    condiciones_texto.append(Producto.descripcion.ilike(f"%{plural_s}%"))
+                    condiciones_texto.append(Producto.nombre.ilike(f"%{plural_es}%"))
+                    condiciones_texto.append(Producto.descripcion.ilike(f"%{plural_es}%"))
+            
+            if condiciones_texto:
                 from sqlalchemy import or_
                 result = await db.execute(
                     select(Producto).where(
-                        or_(*condiciones),
+                        or_(*condiciones_texto),
                         Producto.activo == True,
                         Producto.stock > 0
-                    ).limit(3)
+                    ).limit(10)
                 )
-                productos_encontrados = result.scalars().all()
+                productos_texto = result.scalars().all()
+                
+                # Agregar productos de texto que no estén ya incluidos
+                ids_existentes = {p.id for p in productos_encontrados}
+                for p in productos_texto:
+                    if p.id not in ids_existentes:
+                        productos_encontrados.append(p)
+                
+                logging.info(f"[retrieval_inventario] Búsqueda por texto: {len(productos_texto)} adicionales encontrados")
         
+        # 4. CONSTRUIR RESPUESTA
         if not productos_encontrados:
-            logging.info("[retrieval_inventario] No se encontraron productos relevantes")
-            return "No encontramos productos específicos para tu consulta. ¿Podrías ser más específico sobre qué tipo de producto de seguridad necesitas?"
+            sugerencia = "¿Podrías intentar con palabras como: 'extintores', 'cascos', 'guantes', 'botas', 'chalecos', 'linternas'?"
+            return f"No encontramos productos que coincidan con tu búsqueda. {sugerencia}"
         
-        # MEJORA: Agrupar productos similares y mostrar variaciones
+        # 5. AGRUPAR Y FORMATEAR RESULTADOS
         productos_agrupados = {}
         for p in productos_encontrados:
-            # Extraer nombre base del producto (sin especificaciones)
+            # Extraer nombre base eliminando especificaciones
             nombre_base = p.nombre
-            for especificacion in ["10 libras", "20 libras", "amarillo", "azul", "rojo", "verde", "negro", "blanco", "pequeño", "mediano", "grande"]:
-                nombre_base = nombre_base.replace(especificacion, "").strip()
+            especificaciones = ["10 libras", "20 libras", "amarillo", "azul", "negro", "blanco", "verde", "rojo"]
+            for esp in especificaciones:
+                nombre_base = nombre_base.replace(esp, "").strip()
+            
+            # Limpiar espacios dobles
+            nombre_base = re.sub(r'\s+', ' ', nombre_base).strip()
             
             if nombre_base not in productos_agrupados:
                 productos_agrupados[nombre_base] = []
             productos_agrupados[nombre_base].append(p)
         
-        contexto = []
+        # 6. FORMATEAR RESPUESTA FINAL
+        contexto_partes = []
+        
         for nombre_base, productos_grupo in productos_agrupados.items():
             if len(productos_grupo) == 1:
                 # Producto único
                 p = productos_grupo[0]
-                disponibilidad = "Disponible" if p.stock > 10 else "Stock limitado" if p.stock > 0 else "Agotado"
-                contexto.append(f"{p.nombre}: {p.descripcion} (Precio: ${p.precio:,.0f}, {disponibilidad})")
+                disponibilidad = "✅ Disponible" if p.stock > 10 else "⚠️ Stock limitado"
+                contexto_partes.append(f"• **{p.nombre}**: {p.descripcion} - ${p.precio:,.0f} ({disponibilidad})")
             else:
-                # Múltiples variaciones del mismo producto
-                contexto.append(f"**{nombre_base}** - Disponible en las siguientes variaciones:")
-                for p in productos_grupo:
-                    disponibilidad = "Disponible" if p.stock > 10 else "Stock limitado" if p.stock > 0 else "Agotado"
-                    # Extraer solo la especificación diferenciadora
+                # Múltiples variaciones
+                contexto_partes.append(f"• **{nombre_base}** - Variaciones disponibles:")
+                for p in sorted(productos_grupo, key=lambda x: x.precio):
+                    disponibilidad = "✅ Disponible" if p.stock > 10 else "⚠️ Stock limitado"
                     especificacion = p.nombre.replace(nombre_base, "").strip()
-                    contexto.append(f"  - {especificacion}: {p.descripcion} (Precio: ${p.precio:,.0f}, {disponibilidad})")
+                    if especificacion:
+                        contexto_partes.append(f"  - {especificacion}: ${p.precio:,.0f} ({disponibilidad})")
+                    else:
+                        contexto_partes.append(f"  - Estándar: ${p.precio:,.0f} ({disponibilidad})")
         
-        contexto_str = "\n".join(contexto)
-        logging.info(f"[retrieval_inventario] Contexto encontrado: {len(productos_encontrados)} productos en {len(productos_agrupados)} grupos")
+        contexto_str = "\n".join(contexto_partes)
+        logging.info(f"[retrieval_inventario] Respuesta final: {len(productos_encontrados)} productos en {len(productos_agrupados)} grupos")
+        
         return contexto_str
         
     except Exception as e:
-        logging.error(f"[retrieval_inventario] Error: {str(e)}")
-        return "Error al buscar productos. Por favor, intenta de nuevo."
+        logging.error(f"[retrieval_inventario] Error crítico: {str(e)}")
+        return "Error al buscar productos. Por favor, intenta de nuevo o contacta con soporte."
 
 async def retrieval_contexto_empresa(mensaje: str, db):
     """
@@ -758,6 +855,10 @@ async def detectar_campo_cliente(mensaje: str, campos_faltantes: list):
     # Si el mensaje parece ser un número de teléfono con formato (espacios/guiones)
     if re.match(r'^[\d\s\-\+\(\)]{7,15}$', mensaje) and "telefono" in campos_faltantes:
         return "telefono"
+    
+    # Si el mensaje parece ser un correo electrónico
+    if re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', mensaje) and "correo" in campos_faltantes:
+        return "correo"
     
     # Si contiene palabras típicas de nombres (2+ palabras, al menos una con mayúscula)
     if (len(mensaje.split()) >= 2 and 

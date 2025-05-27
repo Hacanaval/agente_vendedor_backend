@@ -54,6 +54,7 @@ class ClienteManager:
                 # Actualizar cliente existente
                 cliente_existente.nombre_completo = datos_cliente.get("nombre_completo", cliente_existente.nombre_completo)
                 cliente_existente.telefono = datos_cliente.get("telefono", cliente_existente.telefono)
+                cliente_existente.correo = datos_cliente.get("correo", cliente_existente.correo)
                 cliente_existente.direccion = datos_cliente.get("direccion", cliente_existente.direccion)
                 cliente_existente.barrio = datos_cliente.get("barrio", cliente_existente.barrio)
                 cliente_existente.indicaciones_adicionales = datos_cliente.get("indicaciones_adicionales", cliente_existente.indicaciones_adicionales)

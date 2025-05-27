@@ -17,6 +17,7 @@ class PedidoManager:
         "nombre_completo",
         "cedula", 
         "telefono",
+        "correo",
         "direccion",
         "barrio",
         "indicaciones_adicionales"
@@ -494,6 +495,16 @@ class PedidoManager:
                 return {"valido": False, "error": "El barrio debe tener al menos 2 caracteres"}
             if len(valor) > 50:
                 return {"valido": False, "error": "El nombre del barrio es demasiado largo"}
+                
+        elif campo == "correo":
+            # Validación básica de correo electrónico
+            patron_correo = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(patron_correo, valor):
+                return {"valido": False, "error": "Formato de correo electrónico inválido"}
+            if len(valor) > 100:
+                return {"valido": False, "error": "El correo electrónico es demasiado largo"}
+            # Normalizar a minúsculas
+            valor = valor.lower()
                 
         elif campo == "indicaciones_adicionales":
             if len(valor) > 300:

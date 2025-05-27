@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, DateTime, Text, Boolean, Integer
 from sqlalchemy.orm import relationship
-from app.core.database import Base
+from app.core.base_class import Base
 from datetime import datetime
 
 class Cliente(Base):
@@ -18,6 +18,7 @@ class Cliente(Base):
     # Información personal
     nombre_completo = Column(String(200), nullable=False, comment="Nombre completo del cliente")
     telefono = Column(String(20), nullable=False, index=True, comment="Teléfono de contacto")
+    correo = Column(String(200), nullable=True, index=True, comment="Correo electrónico del cliente")
     
     # Información de dirección
     direccion = Column(Text, nullable=False, comment="Dirección completa de entrega")
@@ -48,6 +49,7 @@ class Cliente(Base):
             "cedula": self.cedula,
             "nombre_completo": self.nombre_completo,
             "telefono": self.telefono,
+            "correo": self.correo,
             "direccion": self.direccion,
             "barrio": self.barrio,
             "indicaciones_adicionales": self.indicaciones_adicionales,
@@ -66,6 +68,7 @@ class Cliente(Base):
             cedula=cedula,
             nombre_completo=datos_cliente.get("nombre_completo", ""),
             telefono=datos_cliente.get("telefono", ""),
+            correo=datos_cliente.get("correo", ""),
             direccion=datos_cliente.get("direccion", ""),
             barrio=datos_cliente.get("barrio", ""),
             indicaciones_adicionales=datos_cliente.get("indicaciones_adicionales", ""),

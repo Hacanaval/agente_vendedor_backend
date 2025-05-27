@@ -12,7 +12,7 @@ from app.services.retrieval.retriever_factory import get_retriever
 
 router = APIRouter(prefix="/productos", tags=["productos"])
 
-@router.post("/productos", response_model=ProductoOut)
+@router.post("/", response_model=ProductoOut)
 async def create_producto(producto: ProductoCreate, db: AsyncSession = Depends(get_db)):
     db_producto = Producto(**producto.dict())
     db.add(db_producto)
@@ -20,7 +20,7 @@ async def create_producto(producto: ProductoCreate, db: AsyncSession = Depends(g
     await db.refresh(db_producto)
     return db_producto
 
-@router.get("/productos", response_model=List[ProductoOut])
+@router.get("/", response_model=List[ProductoOut])
 async def list_productos(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Producto))
     productos = result.scalars().all()

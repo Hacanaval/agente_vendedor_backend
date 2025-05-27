@@ -1,20 +1,18 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from app.core.database import Base
+from app.core.base_class import Base
 
 class Producto(Base):
-    __tablename__ = "producto"
+    __tablename__ = "productos"
 
     id = Column(Integer, primary_key=True, index=True)
-    nombre = Column(String(255), nullable=False)
-    descripcion = Column(String(1000), nullable=False)
-    precio = Column(Float, nullable=False)
-    stock = Column(Integer, nullable=False)
-    categoria = Column(String(100), nullable=True)
+    nombre = Column(String(200), nullable=False)
+    descripcion = Column(String(1000), nullable=True)
+    precio = Column(Integer, nullable=False)
+    stock = Column(Integer, nullable=False, default=0)
     activo = Column(Boolean, default=True, nullable=False)
-    creado_en = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    actualizado_en = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    fecha_actualizacion = Column(DateTime, server_default=func.now(), nullable=True)
 
     # Preparado para multiempresa:
     # empresa_id = Column(Integer, ForeignKey("empresa.id"), nullable=True)
