@@ -8,230 +8,211 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 ## [2.0.0] - 2024-12-19
 
 ### 🎉 Añadido
-- **Sistema RAG Dual**: Implementación de RAG para productos y clientes
-- **Gestión Completa de Clientes**: CRUD completo con búsqueda inteligente
-- **Sistema de Exportación CSV**: Exportación avanzada con filtros
-- **API REST Completa**: Endpoints para todas las funcionalidades
-- **RAG de Clientes**: Sistema de búsqueda semántica para información de clientes
-- **Migración de Clientes**: Script para migrar datos existentes
-- **Tests Automatizados**: Suite completa de tests unitarios e integración
-- **Documentación Técnica**: Documentación completa del sistema
-- **Sistema de Reportes**: Generación automática de reportes de estado
+- **Sistema RAG con FAISS**: Implementación de búsqueda semántica usando FAISS en lugar de ChromaDB
+- **Google Gemini Integration**: Migración completa de OpenAI a Google Gemini para LLM y embeddings
+- **Gestión Completa de Clientes**: CRUD completo con cédula como identificador único
+- **Sistema de Exportación CSV**: Exportación avanzada con filtros para clientes, productos y pedidos
+- **Chat Multimodal**: Procesamiento de texto, imágenes (Gemini Vision) y audio (OpenAI Whisper)
+- **Bot de Telegram**: Integración completa con Telegram para atención 24/7
+- **API REST Completa**: 9 módulos de API (auth, admin, chat, clientes, exportar, logs, pedidos, producto, venta)
+- **Sistema de Clasificación**: Clasificación automática de mensajes en inventario, venta o contexto
+- **Transcripción de Audio**: Integración con OpenAI Whisper para convertir audio a texto
+- **Tests Automatizados**: Suite completa de tests para RAG, clientes y exportación
+- **Documentación Técnica**: Documentación completa y precisa del sistema
 
-#### Nuevos Endpoints
-- `GET /clientes/` - Listar clientes con paginación
-- `POST /clientes/` - Crear nuevo cliente
-- `GET /clientes/{id}` - Obtener cliente específico
-- `PUT /clientes/{id}` - Actualizar cliente
-- `DELETE /clientes/{id}` - Eliminar cliente
-- `GET /clientes/buscar` - Búsqueda inteligente de clientes
-- `GET /exportar/clientes` - Exportar clientes a CSV
-- `GET /exportar/productos` - Exportar productos a CSV
-- `GET /exportar/pedidos` - Exportar pedidos a CSV
+### 🔧 Técnico
+- **FAISS Retriever**: Sistema de búsqueda vectorial optimizado con fallback a búsqueda por texto
+- **Gemini Embeddings**: Uso de `text-embedding-004` para generación de vectores semánticos
+- **SQLAlchemy ORM**: Modelos de datos optimizados con relaciones y validaciones
+- **Pydantic Schemas**: Validación robusta de datos de entrada y salida
+- **Async Operations**: Operaciones asíncronas para mejor performance
+- **Logging Estructurado**: Sistema de logging detallado para debugging y monitoreo
+- **Alembic Migrations**: Sistema de migraciones de base de datos
+- **Factory Pattern**: Patrón factory para retrievers (FAISS/Pinecone)
 
-#### Nuevos Modelos
-- **Cliente**: Modelo completo con validaciones
-- **ClienteCreate**: Schema para creación de clientes
-- **ClienteUpdate**: Schema para actualización de clientes
-- **ExportRequest**: Schema para solicitudes de exportación
+### 🗄️ Base de Datos
+- **Modelo Cliente**: Cédula como PK, información completa de contacto y dirección
+- **Modelo Producto**: Gestión de inventario con stock y categorías
+- **Modelo Venta**: Relación con cliente por cédula, detalles de transacción
+- **Modelo Mensaje**: Historial completo de conversaciones multimodales
+- **Índices Optimizados**: Índices para búsquedas rápidas por cédula, nombre, teléfono
 
-#### Nuevos Servicios
-- **ClienteManager**: Gestión completa de clientes
-- **CSVExporter**: Exportación de datos en formato CSV
-- **RAGClientes**: Sistema RAG específico para clientes
+### 📊 APIs Implementadas
+- **Chat API**: `/chat/texto`, `/chat/imagen`, `/chat/audio`, `/chat/historial`
+- **Clientes API**: CRUD completo con búsqueda inteligente
+- **Productos API**: Gestión de catálogo con stock
+- **Pedidos API**: Procesamiento de órdenes de venta
+- **Exportación API**: CSV con filtros avanzados
+- **Admin API**: Estadísticas y sincronización de índices
+- **Logs API**: Métricas de uso del sistema
 
-### 🔄 Cambiado
-- **Arquitectura del Sistema**: Refactorización completa hacia microservicios
-- **Base de Datos**: Migración de esquema para soportar nuevas funcionalidades
-- **Sistema RAG**: Optimización y mejora del rendimiento
-- **API Responses**: Estandarización de respuestas JSON
-- **Error Handling**: Manejo mejorado de errores y excepciones
+### 🚀 Integraciones
+- **Google Gemini**: LLM principal (gemini-2.0-flash)
+- **Google Gemini Vision**: Procesamiento de imágenes
+- **Google Gemini Embeddings**: Vectorización de texto
+- **OpenAI Whisper**: Transcripción de audio (único uso de OpenAI)
+- **Telegram Bot**: Bot completo con webhook support
+- **FAISS**: Base de datos vectorial para búsqueda semántica
+
+### 🔄 Migrado
+- **De OpenAI a Gemini**: Migración completa del LLM principal
+- **De ChromaDB a FAISS**: Cambio de base de datos vectorial
+- **Sistema de Clientes**: Migración de ID numérico a cédula como PK
+- **Arquitectura de Servicios**: Refactorización en servicios especializados
+
+### 🛠️ Mejorado
+- **Performance RAG**: Optimización con FAISS y embeddings de Gemini
+- **Búsqueda de Clientes**: Búsqueda por cédula, nombre, teléfono
+- **Validación de Datos**: Validaciones robustas con Pydantic
+- **Manejo de Errores**: Sistema de manejo de errores mejorado
+- **Logging**: Logging estructurado y detallado
+- **Documentación**: Documentación técnica completa y precisa
 
 ### 🐛 Corregido
-- **Memory Leaks**: Corrección de fugas de memoria en ChromaDB
-- **Database Connections**: Optimización de conexiones a base de datos
-- **RAG Performance**: Mejora significativa en tiempos de respuesta
-- **CSV Encoding**: Corrección de problemas de codificación en exportaciones
-
-### 🔒 Seguridad
-- **Input Validation**: Validación estricta de datos de entrada
-- **SQL Injection Prevention**: Protección contra inyección SQL
-- **Rate Limiting**: Implementación de límites de velocidad
-- **Data Sanitization**: Sanitización de datos en todas las operaciones
+- **Búsqueda Semántica**: Implementación correcta con FAISS
+- **Gestión de Archivos**: Validación y sanitización de uploads
+- **Relaciones de DB**: Relaciones correctas entre modelos
+- **Async Operations**: Operaciones asíncronas optimizadas
+- **Memory Management**: Gestión optimizada de memoria para FAISS
 
 ## [1.5.0] - 2024-12-15
 
 ### 🎉 Añadido
-- **Sistema de Pedidos Mejorado**: Gestión avanzada de estados de pedidos
-- **Validación de Productos**: Verificación automática de stock y disponibilidad
-- **Cálculo Automático**: Totales, impuestos y descuentos automáticos
-- **Historial de Pedidos**: Seguimiento completo del ciclo de vida
+- **RAG Básico**: Primera implementación del sistema RAG
+- **Gestión de Productos**: CRUD básico de productos
+- **API FastAPI**: Estructura básica de la API
+- **Base de Datos**: Modelos iniciales con SQLAlchemy
 
-### 🔄 Cambiado
-- **Modelo de Venta**: Ampliación con nuevos campos y metadatos
-- **API de Pedidos**: Mejora en la estructura de endpoints
-- **Performance**: Optimización de consultas de base de datos
-
-### 🐛 Corregido
-- **Concurrency Issues**: Problemas de concurrencia en creación de pedidos
-- **Data Consistency**: Consistencia de datos en operaciones transaccionales
+### 🔧 Técnico
+- **SQLite**: Base de datos inicial
+- **FastAPI**: Framework web principal
+- **SQLAlchemy**: ORM para base de datos
+- **Uvicorn**: Servidor ASGI
 
 ## [1.0.0] - 2024-12-10
 
 ### 🎉 Añadido
-- **Sistema RAG Básico**: Implementación inicial del sistema RAG
-- **API FastAPI**: Framework web con documentación automática
-- **Base de Datos SQLite**: Almacenamiento persistente de datos
-- **Modelo de Productos**: Gestión básica de catálogo de productos
-- **Modelo de Ventas**: Sistema básico de registro de ventas
-- **ChromaDB Integration**: Base de datos vectorial para embeddings
-- **OpenAI Integration**: Integración con GPT-4 y embeddings
-
-#### Endpoints Iniciales
-- `POST /rag/query` - Consulta al sistema RAG
-- `POST /rag/add-product` - Añadir producto al catálogo
-- `GET /rag/products` - Listar productos disponibles
-- `POST /pedidos/` - Crear nuevo pedido
-- `GET /pedidos/` - Listar pedidos
-
-#### Funcionalidades Core
-- **RAG de Productos**: Búsqueda semántica en catálogo
-- **Procesamiento de Pedidos**: Creación y gestión básica
-- **Embeddings**: Vectorización de productos para búsqueda
-- **Respuestas Contextuales**: IA que comprende consultas de ventas
-
-### 🛠️ Infraestructura
-- **Alembic**: Sistema de migraciones de base de datos
-- **Pydantic**: Validación de datos y schemas
-- **Uvicorn**: Servidor ASGI para producción
-- **Environment Variables**: Configuración mediante variables de entorno
-
-## [0.5.0] - 2024-12-05
-
-### 🎉 Añadido
 - **Proyecto Inicial**: Estructura básica del proyecto
-- **Configuración de Desarrollo**: Setup inicial de desarrollo
+- **Configuración**: Setup inicial con Python y dependencias
+- **Git Repository**: Inicialización del repositorio
+
+### 🔧 Técnico
+- **Python 3.9+**: Versión mínima de Python
+- **Virtual Environment**: Configuración de entorno virtual
 - **Requirements**: Dependencias básicas del proyecto
-- **Git Configuration**: Configuración de repositorio Git
 
-### 🛠️ Setup Inicial
-- **Python Environment**: Configuración de entorno virtual
-- **Project Structure**: Estructura de directorios del proyecto
-- **Basic Documentation**: README inicial del proyecto
+## 📋 Notas de Migración
 
-## [Unreleased] - Próximas Funcionalidades
+### De v1.5.0 a v2.0.0
 
-### 🚀 Planificado para v2.1.0
-- [ ] **Dashboard Web**: Interfaz web para administración
+#### Cambios Críticos
+1. **Base de Datos**: 
+   - Clientes ahora usan cédula como PK en lugar de ID numérico
+   - Nuevos campos en modelo Cliente (barrio, indicaciones_adicionales, etc.)
+   - Modelo Mensaje añadido para historial de chat
+
+2. **APIs**:
+   - Endpoints de clientes cambiaron de `/clientes/{id}` a `/clientes/{cedula}`
+   - Nuevos endpoints multimodales en `/chat/`
+   - Estructura de respuesta actualizada
+
+3. **Configuración**:
+   - `OPENAI_API_KEY` ahora opcional (solo para audio)
+   - `GOOGLE_API_KEY` ahora requerida
+   - Nuevas variables de entorno para Telegram
+
+#### Script de Migración
+```bash
+# Migrar datos de clientes existentes
+python migrate_clientes.py
+
+# Actualizar índices FAISS
+python -c "from app.services.retrieval.faiss_retriever import FAISSRetriever; import asyncio; asyncio.run(FAISSRetriever(db).build_index())"
+
+# Verificar migración
+python test_sistema_clientes.py
+```
+
+## 🔮 Roadmap
+
+### v2.1.0 (Próxima Release)
+- [ ] **Autenticación JWT**: Sistema completo de autenticación
+- [ ] **PostgreSQL**: Migración de SQLite a PostgreSQL
+- [ ] **Dashboard Web**: Interfaz web de administración
 - [ ] **Exportación Excel**: Soporte para archivos Excel
-- [ ] **API de Webhooks**: Notificaciones en tiempo real
-- [ ] **Autenticación JWT**: Sistema de autenticación robusto
-- [ ] **Rate Limiting Avanzado**: Control de velocidad por usuario
-- [ ] **Caching Redis**: Sistema de caché distribuido
-- [ ] **Logging Estructurado**: Logs en formato JSON
-- [ ] **Health Checks**: Endpoints de monitoreo de salud
+- [ ] **Cache Redis**: Sistema de caché distribuido
+- [ ] **Health Checks**: Endpoints de salud del sistema
 
-### 🚀 Planificado para v2.2.0
-- [ ] **Integración CRM**: Conectores para CRM externos
-- [ ] **Soporte Multiidioma**: Internacionalización completa
-- [ ] **Machine Learning**: Modelos predictivos de ventas
-- [ ] **Analytics Dashboard**: Métricas y análisis avanzados
-- [ ] **Mobile API**: Endpoints optimizados para móviles
-- [ ] **Real-time Notifications**: Notificaciones push
-- [ ] **Advanced Search**: Búsqueda con filtros complejos
+### v2.2.0 (Futuro)
+- [ ] **Multi-empresa**: Soporte completo para múltiples empresas
+- [ ] **Webhooks**: Sistema de webhooks para integraciones
+- [ ] **Analytics**: Dashboard de analytics avanzado
+- [ ] **Mobile App**: Aplicación móvil nativa
+- [ ] **WhatsApp Bot**: Integración con WhatsApp Business
 
-### 🚀 Planificado para v3.0.0
-- [ ] **Microservices Architecture**: Arquitectura de microservicios
-- [ ] **Kubernetes Deployment**: Despliegue en Kubernetes
-- [ ] **GraphQL API**: API GraphQL complementaria
-- [ ] **Event Sourcing**: Arquitectura basada en eventos
-- [ ] **CQRS Pattern**: Separación de comandos y consultas
-- [ ] **Distributed Tracing**: Trazabilidad distribuida
-- [ ] **Service Mesh**: Malla de servicios
+### v3.0.0 (Visión)
+- [ ] **Microservicios**: Arquitectura de microservicios
+- [ ] **Kubernetes**: Despliegue en Kubernetes
+- [ ] **Machine Learning**: Modelos personalizados de ML
+- [ ] **Real-time**: Comunicación en tiempo real
+- [ ] **Multi-idioma**: Soporte para múltiples idiomas
 
-## 📊 Métricas de Desarrollo
+## 📊 Métricas de Release
 
-### Estadísticas por Versión
-
-#### v2.0.0
-- **Líneas de Código**: ~5,000 líneas
-- **Archivos**: 25+ archivos Python
+### v2.0.0 Estadísticas
+- **Líneas de Código**: ~15,000 líneas
+- **Archivos Python**: 45+ archivos
+- **Endpoints API**: 25+ endpoints
+- **Modelos de Datos**: 7 modelos principales
 - **Tests**: 15+ tests automatizados
-- **Cobertura**: 85%+ de cobertura de código
-- **Documentación**: 10+ archivos de documentación
+- **Documentación**: 5 archivos de documentación
 
-#### v1.0.0
-- **Líneas de Código**: ~2,000 líneas
-- **Archivos**: 12 archivos Python
-- **Tests**: 5 tests básicos
-- **Cobertura**: 60% de cobertura de código
-- **Documentación**: 3 archivos de documentación
+### Performance Benchmarks
+- **Tiempo de Respuesta RAG**: 2-7 segundos
+- **Búsqueda FAISS**: < 100ms
+- **Consultas DB**: < 200ms
+- **Transcripción Audio**: 1-3 segundos
+- **Procesamiento Imagen**: 2-5 segundos
 
-### Rendimiento por Versión
+## 🏷️ Tags y Releases
 
-#### v2.0.0
-- **RAG Query Time**: < 2 segundos
-- **Database Query**: < 100ms
-- **Export Generation**: < 30s para 10k registros
-- **Memory Usage**: < 512MB
-- **API Response Time**: < 500ms
+### Convención de Tags
+- **v2.0.0**: Release principal con cambios mayores
+- **v2.0.1**: Hotfix para bugs críticos
+- **v2.1.0-beta**: Pre-release para testing
+- **v2.1.0-rc1**: Release candidate
 
-#### v1.0.0
-- **RAG Query Time**: < 5 segundos
-- **Database Query**: < 200ms
-- **Memory Usage**: < 256MB
-- **API Response Time**: < 1s
+### Proceso de Release
+1. **Development**: Desarrollo en ramas feature
+2. **Testing**: Tests automatizados y manuales
+3. **Documentation**: Actualización de documentación
+4. **Tagging**: Creación de tag con versión
+5. **Deployment**: Despliegue a producción
 
-## 🐛 Problemas Conocidos
+## 🤝 Contribuciones
 
-### v2.0.0
-- **Limitación**: Exportación solo en formato CSV
-- **Beta Feature**: RAG de clientes en fase beta
-- **Idioma**: Búsqueda semántica solo en español
-- **Escalabilidad**: Limitado a SQLite para desarrollo
+### Tipos de Cambios
+- **feat**: Nueva funcionalidad
+- **fix**: Corrección de bugs
+- **docs**: Cambios en documentación
+- **style**: Cambios de formato (no afectan código)
+- **refactor**: Refactorización de código
+- **test**: Añadir o modificar tests
+- **chore**: Cambios en build o herramientas
 
-### v1.0.0
-- **Performance**: Consultas RAG lentas en datasets grandes
-- **Memory**: Uso elevado de memoria con muchos productos
-- **Error Handling**: Manejo básico de errores
+### Ejemplo de Commit
+```
+feat(rag): implementar búsqueda semántica con FAISS
 
-## 🔄 Proceso de Migración
+- Añadir FAISSRetriever para búsqueda vectorial
+- Integrar con Gemini embeddings
+- Implementar fallback a búsqueda por texto
+- Optimizar performance para datasets medianos
 
-### De v1.0.0 a v2.0.0
-
-#### Pasos Requeridos
-1. **Backup de Datos**: Respaldar base de datos existente
-2. **Ejecutar Migraciones**: `alembic upgrade head`
-3. **Migrar Clientes**: `python migrate_clientes.py`
-4. **Actualizar Variables**: Revisar `env.example`
-5. **Ejecutar Tests**: Verificar funcionamiento
-
-#### Cambios Breaking
-- **API Endpoints**: Nuevos endpoints para clientes
-- **Database Schema**: Nuevas tablas y campos
-- **Dependencies**: Nuevas dependencias en requirements.txt
-
-#### Compatibilidad
-- **Backward Compatible**: API v1 sigue funcionando
-- **Data Migration**: Migración automática de datos
-- **Configuration**: Variables de entorno compatibles
-
-## 📚 Referencias de Versiones
-
-### Tags de Git
-- `v2.0.0` - Release principal con nuevas funcionalidades
-- `v1.5.0` - Mejoras en sistema de pedidos
-- `v1.0.0` - Release inicial estable
-- `v0.5.0` - Setup inicial del proyecto
-
-### Branches
-- `main` - Rama principal estable
-- `develop` - Rama de desarrollo
-- `feature/*` - Ramas de funcionalidades
-- `hotfix/*` - Ramas de correcciones urgentes
+Closes #123
+```
 
 ---
 
-**Mantenido por el equipo de desarrollo del Agente Vendedor Inteligente**
-
-Para más información sobre versiones específicas, consulta los [releases en GitHub](https://github.com/tu-usuario/agente_vendedor/releases). 
+**Changelog v2.0 - Agente Vendedor Inteligente**
+**Documentación precisa de todos los cambios implementados** 
