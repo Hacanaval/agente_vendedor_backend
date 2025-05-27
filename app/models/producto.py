@@ -11,6 +11,7 @@ class Producto(Base):
     descripcion = Column(String(1000), nullable=True)
     precio = Column(Integer, nullable=False)
     stock = Column(Integer, nullable=False, default=0)
+    categoria = Column(String(100), nullable=True)
     activo = Column(Boolean, default=True, nullable=False)
     fecha_actualizacion = Column(DateTime, server_default=func.now(), nullable=True)
 
@@ -21,5 +22,5 @@ class Producto(Base):
     def __repr__(self):
         return (
             f"<Producto(id={self.id}, nombre={self.nombre}, precio={self.precio}, "
-            f"stock={self.stock}, activo={self.activo})>"
+            f"stock={self.stock}, categoria={self.categoria}, activo={self.activo})>"
         )

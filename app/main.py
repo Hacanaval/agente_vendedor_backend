@@ -15,6 +15,7 @@ from app.api.clientes import router as clientes_router
 from app.api.exportar import router as exportar_router
 from app.api.chat_control import router as chat_control_router
 
+
 # Importa la función para crear tablas
 from app.core.database import create_tables
 
@@ -29,6 +30,17 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup_event():
     await create_tables()
+    
+    # Inicializar estado por defecto del sistema AI (siempre ON)
+    from app.core.database import get_db
+    from app.services.chat_control_service import ChatControlService
+    db_gen = get_db()
+    db = await db_gen.__anext__()
+    try:
+        await ChatControlService.ensure_default_global_state(db)
+    finally:
+        await db.close()
+    
     # Carga inicial de productos (opcional, solo si es necesario)
     # from app.services.producto_service import cargar_productos_iniciales
     # loop = asyncio.get_event_loop()

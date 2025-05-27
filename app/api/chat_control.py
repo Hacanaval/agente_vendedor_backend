@@ -67,8 +67,12 @@ async def get_estado_sistema_ia(db: AsyncSession = Depends(get_db)):
     📊 Obtiene el estado actual del sistema de IA global.
     
     Útil para sincronizar el estado del botón "Sistema IA ON/OFF" en el frontend.
+    Siempre garantiza que exista un registro por defecto (ON).
     """
     try:
+        # Asegurar que existe registro por defecto primero
+        await ChatControlService.ensure_default_global_state(db)
+        
         ia_activa = await ChatControlService.is_ia_activa_global(db)
         
         estado_texto = "activo" if ia_activa else "desactivado"

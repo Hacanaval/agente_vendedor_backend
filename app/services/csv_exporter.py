@@ -64,8 +64,7 @@ class CSVExporter:
                 'Stock',
                 'Categoría',
                 'Activo',
-                'Fecha Creación',
-                'Última Actualización'
+                'Fecha Actualización'
             ]
             writer.writerow(headers)
             
@@ -79,7 +78,6 @@ class CSVExporter:
                     producto.stock,
                     producto.categoria or '',
                     'Sí' if producto.activo else 'No',
-                    producto.fecha_creacion.strftime('%Y-%m-%d %H:%M:%S') if producto.fecha_creacion else '',
                     producto.fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S') if producto.fecha_actualizacion else ''
                 ]
                 writer.writerow(row)

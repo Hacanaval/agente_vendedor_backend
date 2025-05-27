@@ -9,18 +9,27 @@ Un sistema avanzado de chatbot de ventas que utiliza **RAG (Retrieval-Augmented 
 - **RAG de Clientes**: Gestión automática de información de clientes
 - **Procesamiento de Lenguaje Natural**: Comprende intenciones de compra complejas
 - **Recomendaciones Inteligentes**: Sugiere productos según las necesidades del cliente
+- **Sistema AI Persistente**: Botón Sistema AI con estado persistente (ON por defecto)
 
 ### 💼 Gestión Comercial Completa
-- **Catálogo de Productos**: 7 productos de seguridad industrial categorizados
+- **Catálogo de Productos**: Productos de seguridad industrial categorizados automáticamente
 - **Sistema de Pedidos**: Carrito de compras conversacional
 - **Gestión de Ventas**: Proceso completo desde consulta hasta venta final
 - **Control de Inventario**: Validaciones de stock y cantidades máximas
+- **Carga CSV Inteligente**: Importación con categorización automática y reglas robustas
+
+### 🏷️ Sistema de Categorización Automática
+- **Reglas Inteligentes**: Asignación automática de categorías a productos
+- **Categoría por Defecto**: "General" para productos sin categoría específica
+- **Actualización Completa**: Stock, precio y categoría en productos existentes
+- **Validación Robusta**: Manejo de valores NULL, vacíos y formatos diversos
 
 ### 🛡️ Seguridad y Validaciones
 - **Validación de Datos**: Cédula, email, teléfono
 - **Control de Cantidades**: Límites máximos por producto (1000 unidades)
 - **Gestión de Estados**: Control de flujo de conversación
 - **Logging Avanzado**: Trazabilidad completa de operaciones
+- **Exportación Segura**: CSV con categorías y validaciones completas
 
 ## 📋 Tabla de Contenidos
 
@@ -152,6 +161,7 @@ Content-Type: application/json
 GET /api/productos/                    # Listar todos los productos
 GET /api/productos/{id}               # Obtener producto específico
 POST /api/productos/                  # Crear nuevo producto
+POST /api/productos/reemplazar_csv    # Carga CSV con categorización automática
 PUT /api/productos/{id}               # Actualizar producto
 DELETE /api/productos/{id}            # Eliminar producto
 ```
@@ -172,6 +182,20 @@ GET /api/ventas/{id}                # Obtener venta específica
 GET /api/ventas/exportar-csv        # Exportar ventas a CSV
 ```
 
+### Sistema de Control AI
+```http
+GET /api/chat-control/sistema/estado  # Obtener estado del Sistema AI
+POST /api/chat-control/sistema/toggle # Cambiar estado del Sistema AI
+```
+
+### Exportación de Datos
+```http
+GET /api/exportar/inventario          # Exportar inventario con categorías
+GET /api/exportar/clientes           # Exportar base de clientes
+GET /api/exportar/ventas             # Exportar ventas
+GET /api/exportar/conversaciones     # Exportar conversaciones RAG
+```
+
 ## 📊 Modelos de Datos
 
 ### Producto
@@ -181,10 +205,10 @@ class Producto(Base):
     nombre: str
     descripcion: str
     precio: float
-    categoria: str
-    disponible: bool
     stock: int
-    imagen_url: str (opcional)
+    categoria: str           # Campo agregado para categorización
+    activo: bool
+    fecha_actualizacion: datetime
 ```
 
 ### Cliente
@@ -246,7 +270,7 @@ PATRONES_COMPRA = [
 ## 🧪 Pruebas
 
 ### Ejecutar Pruebas Completas
-```bash
+   ```bash
 # Prueba del sistema RAG
 python test_rag_simple.py
 
@@ -271,7 +295,7 @@ python test_exportacion_csv.py
 ## 🚀 Despliegue
 
 ### Desarrollo Local
-```bash
+   ```bash
 uvicorn app.main:app --reload --port 8001
 ```
 
@@ -343,24 +367,38 @@ OPENAI_API_KEY=your-production-api-key
 
 ## 📚 Documentación Adicional
 
-- [Documentación Técnica Completa](DOCUMENTACION_TECNICA.md)
-- [Changelog](CHANGELOG.md)
-- [Sistema de Clientes](SISTEMA_CLIENTES.md)
-- [Sistema de Exportación CSV](SISTEMA_EXPORTACION_CSV.md)
-- [Reporte Final RAG](REPORTE_FINAL_RAG.md)
+### 🏷️ Gestión de Categorías
+- **[GUIA_REGLAS_CATEGORIA_CSV.md](./GUIA_REGLAS_CATEGORIA_CSV.md)** - Reglas de categorización automática en CSV
+- Ejemplos prácticos de carga CSV con y sin categorías
+- Casos de uso y validaciones automáticas
+
+### 🔘 Sistema AI Persistente
+- **[GUIA_BOTON_SISTEMA_AI.md](./GUIA_BOTON_SISTEMA_AI.md)** - Implementación completa del botón Sistema AI
+- Hook React y componente JavaScript listos para usar
+- Estado persistente entre recargas de página
+
+### 🔍 Verificación CSV→RAG
+- **[GUIA_VERIFICACION_CSV_FRONTEND.md](./GUIA_VERIFICACION_CSV_FRONTEND.md)** - Verificación de sincronización
+- Scripts de diagnóstico automático
+- Casos comunes de problemas y soluciones
+
+### 📝 Historial de Cambios
+- **[CHANGELOG.md](./CHANGELOG.md)** - Registro detallado de todas las mejoras
+- Versión 2.3.0 con nuevas funcionalidades implementadas
+- Documentación técnica de migración y cambios
 
 ## 📞 Soporte
 
 ### Problemas Comunes
 
 **Error de dependencias circulares**
-```bash
+   ```bash
 # Solución: Verificar imports en app/core/base_class.py
 python -c "from app.models import producto"
-```
+   ```
 
 **Base de datos no inicializada**
-```bash
+   ```bash
 # Recrear base de datos
 python create_and_migrate.py
 ```

@@ -13,12 +13,9 @@ class ChatControlService:
     """
     
     @staticmethod
-    async def is_ia_activa_global(db: AsyncSession) -> bool:
+    async def ensure_default_global_state(db: AsyncSession) -> None:
         """
-        Verifica si la IA está activa globalmente.
-        
-        Returns:
-            bool: True si la IA está activa globalmente, False si está desactivada
+        Asegura que exista un registro de control global por defecto (IA ON).
         """
         try:
             result = await db.execute(
@@ -31,7 +28,45 @@ class ChatControlService:
             )
             control_global = result.scalar_one_or_none()
             
-            # Si no existe registro, por defecto la IA está activa
+            if control_global is None:
+                # Crear registro por defecto con IA activa
+                control_global = ChatControl(
+                    chat_id=None,
+                    ia_activa=True,  # Por defecto siempre ON
+                    tipo_control="global",
+                    motivo_desactivacion=None,
+                    usuario_que_desactivo=None
+                )
+                db.add(control_global)
+                await db.commit()
+                logger.info("Estado global por defecto creado: IA activa")
+        except Exception as e:
+            logger.error(f"Error creando estado global por defecto: {e}")
+            await db.rollback()
+
+    @staticmethod
+    async def is_ia_activa_global(db: AsyncSession) -> bool:
+        """
+        Verifica si la IA está activa globalmente.
+        
+        Returns:
+            bool: True si la IA está activa globalmente, False si está desactivada
+        """
+        try:
+            # Asegurar que exista registro por defecto
+            await ChatControlService.ensure_default_global_state(db)
+            
+            result = await db.execute(
+                select(ChatControl).where(
+                    and_(
+                        ChatControl.tipo_control == "global",
+                        ChatControl.chat_id.is_(None)
+                    )
+                )
+            )
+            control_global = result.scalar_one_or_none()
+            
+            # Si no existe registro (aunque debería existir después de ensure_default), por defecto activa
             if control_global is None:
                 return True
             

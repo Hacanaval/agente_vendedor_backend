@@ -7,6 +7,7 @@ class ProductoBase(BaseModel):
     descripcion: Optional[str] = None
     precio: int
     stock: int
+    categoria: Optional[str] = None
     activo: Optional[bool] = True
 
 class ProductoCreate(ProductoBase):

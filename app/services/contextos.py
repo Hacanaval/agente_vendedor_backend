@@ -1,5 +1,4 @@
-CONTEXTO_EMPRESA_SEXTINVALLE = """
-Sextinvalle Ltda es una empresa colombiana con más de 30 años de experiencia, especializada en seguridad industrial, protección contra incendios, señalización y dotaciones empresariales. 
+CONTEXTO_EMPRESA_SEXTINVALLE = """Sextinvalle Ltda es una empresa colombiana con más de 30 años de experiencia, especializada en seguridad industrial, protección contra incendios, señalización y dotaciones empresariales.
 
 **Servicios principales:**
 - Mantenimiento, recarga e instalación de equipos y sistemas contra incendio: extintores de todo tipo (CO2, H2O, ABC, K), gabinetes, mangueras, detectores, sistemas de alarma y accesorios.
@@ -21,9 +20,13 @@ Sextinvalle Ltda es una empresa colombiana con más de 30 años de experiencia, 
 
 **Cobertura y contacto:**
 - Sede principal en Cali, cobertura en todo el suroccidente colombiano.
+- Dirección: Cra 4 #31-11, Cali - Valle del Cauca, Colombia
+- Teléfono fijo: (602) 3928926
+- Móvil: 3182842304
+- Correos: seguridad@sextinvalle.com.co, sextinvalleltda@hotmail.com
 - Página web: https://sextinvalle.com.co
 - Redes sociales: Facebook, Instagram, YouTube, Twitter.
-- Atención personalizada por canales digitales y telefónicos.
+- Servicio a domicilio y atención personalizada por canales digitales y telefónicos.
 
 **Misión:** Proteger la vida y los bienes de nuestros clientes mediante soluciones integrales y confiables en seguridad industrial y protección contra incendios.
 
@@ -37,4 +40,5 @@ Sextinvalle Ltda es una empresa colombiana con más de 30 años de experiencia, 
 - Cursos de capacitación en uso y manejo de extintores.
 - Inspección y diagnóstico de riesgos de incendio.
 - Mantenimiento preventivo y correctivo a equipos y sistemas de seguridad.
-"""
+- Despachos a todo el país, seguros y confiables.
+- Calidad y cumplimiento en todos los productos."""
