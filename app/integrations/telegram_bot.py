@@ -8,16 +8,11 @@ import logging
 
 load_dotenv()
 
-# Configuración segura del bot
-BOT_TOKEN_FIXED = os.getenv("BOT_TOKEN_FIXED")
+# Configuración del bot
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")  # Token principal del bot
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
 
 # Validación de configuración
-if not BOT_TOKEN_FIXED:
-    logging.error("ERROR: BOT_TOKEN_FIXED no está definido en el entorno.")
-    exit(1)
-
 if not TELEGRAM_TOKEN:
     logging.error("ERROR: TELEGRAM_TOKEN no está definido en el entorno.")
     exit(1)

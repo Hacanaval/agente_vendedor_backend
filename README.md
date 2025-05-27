@@ -1,424 +1,197 @@
-# 🤖 Agente Vendedor - Sistema de Chatbot de Ventas con IA
+# 🤖 Agente Vendedor Sextinvalle - Sistema de Ventas con IA
 
-Un sistema avanzado de chatbot de ventas que utiliza **RAG (Retrieval-Augmented Generation)** e inteligencia artificial para automatizar el proceso de ventas de productos de seguridad industrial. Desarrollado con **FastAPI** y **OpenAI GPT**.
+Un sistema avanzado de ventas inteligente que utiliza **RAG (Retrieval-Augmented Generation)** e inteligencia artificial para automatizar el proceso comercial. Combina **FastAPI**, **React**, **Telegram Bot** y **LLMs** (OpenAI GPT + Google Gemini).
 
 ## 🚀 Características Principales
 
 ### 🧠 Inteligencia Artificial Avanzada
-- **RAG de Inventario**: Consultas inteligentes sobre productos disponibles
-- **RAG de Clientes**: Gestión automática de información de clientes
+- **Sistema RAG Híbrido**: Búsqueda semántica + texto para inventario y clientes
 - **Procesamiento de Lenguaje Natural**: Comprende intenciones de compra complejas
-- **Recomendaciones Inteligentes**: Sugiere productos según las necesidades del cliente
-- **Sistema AI Persistente**: Botón Sistema AI con estado persistente (ON por defecto)
+- **Gestión de Pedidos Conversacional**: Carrito de compras inteligente
+- **Múltiples LLMs**: OpenAI GPT-4 y Google Gemini
+- **Memoria Conversacional**: Contexto de últimos 10 mensajes
 
 ### 💼 Gestión Comercial Completa
-- **Catálogo de Productos**: Productos de seguridad industrial categorizados automáticamente
-- **Sistema de Pedidos**: Carrito de compras conversacional
-- **Gestión de Ventas**: Proceso completo desde consulta hasta venta final
-- **Control de Inventario**: Validaciones de stock y cantidades máximas
-- **Carga CSV Inteligente**: Importación con categorización automática y reglas robustas
-
-### 🏷️ Sistema de Categorización Automática
-- **Reglas Inteligentes**: Asignación automática de categorías a productos
-- **Categoría por Defecto**: "General" para productos sin categoría específica
-- **Actualización Completa**: Stock, precio y categoría en productos existentes
-- **Validación Robusta**: Manejo de valores NULL, vacíos y formatos diversos
+- **Frontend Web**: Interfaz React con TypeScript
+- **Bot de Telegram**: Integración nativa para ventas
+- **API REST**: Backend robusto con FastAPI
+- **Base de Datos**: SQLite con migración a PostgreSQL
+- **Exportación CSV**: Reportes y análisis de ventas
 
 ### 🛡️ Seguridad y Validaciones
-- **Validación de Datos**: Cédula, email, teléfono
-- **Control de Cantidades**: Límites máximos por producto (1000 unidades)
-- **Gestión de Estados**: Control de flujo de conversación
-- **Logging Avanzado**: Trazabilidad completa de operaciones
-- **Exportación Segura**: CSV con categorías y validaciones completas
+- **Validación de Datos**: Cédula, email, teléfono, cantidades
+- **Control de Estados**: Flujo de conversación estructurado
+- **Gestión de Secretos**: Variables de entorno seguras
+- **Logging Completo**: Trazabilidad de todas las operaciones
 
-## 📋 Tabla de Contenidos
+## 📚 Documentación
 
-- [Instalación y Configuración](#instalación-y-configuración)
-- [Arquitectura del Sistema](#arquitectura-del-sistema)
-- [API Endpoints](#api-endpoints)
-- [Modelos de Datos](#modelos-de-datos)
-- [Sistemas RAG](#sistemas-rag)
-- [Pruebas](#pruebas)
-- [Despliegue](#despliegue)
-- [Contribución](#contribución)
+- **[📖 Arquitectura Completa](ARQUITECTURA_SISTEMA.md)** - Documentación técnica detallada
+- **[🔌 API Reference](API_REFERENCE.md)** - Endpoints y esquemas
+- **[🚀 Deployment Guide](DEPLOYMENT_GUIDE.md)** - Guía de despliegue
+- **[📝 Changelog](CHANGELOG.md)** - Historial de cambios
 
-## 🛠️ Instalación y Configuración
+## ⚡ Inicio Rápido
 
-### Prerrequisitos
-- Python 3.8+
-- PostgreSQL o SQLite
-- OpenAI API Key
-
-### Instalación Rápida
-
+### 1. Instalación
 ```bash
-# Clonar el repositorio
+# Clonar repositorio
 git clone <repository-url>
 cd agente_vendedor
 
 # Crear entorno virtual
 python -m venv venv
-source venv/bin/activate  # En Windows: venv\Scripts\activate
+source venv/bin/activate  # Linux/Mac
+# venv\Scripts\activate   # Windows
 
 # Instalar dependencias
 pip install -r requirements.txt
+```
 
-# Configurar variables de entorno
+### 2. Configuración
+```bash
+# Copiar archivo de configuración
 cp env.example .env
-# Editar .env con tus credenciales
 
-# Inicializar base de datos
+# Editar .env con tus credenciales
+# OPENAI_API_KEY=sk-...
+# GOOGLE_API_KEY=AIza...
+# TELEGRAM_TOKEN=123456:ABC...
+```
+
+### 3. Inicialización
+```bash
+# Crear base de datos
 python create_and_migrate.py
 
-# Ejecutar servidor
-uvicorn app.main:app --reload --port 8001
+# Cargar productos de ejemplo (opcional)
+python scripts/load_sample_data.py
 ```
 
-### Variables de Entorno Requeridas
+### 4. Ejecución
+```bash
+# Backend API (puerto 8001)
+python -m uvicorn app.main:app --reload --port 8001
 
-```env
-# OpenAI Configuration
-OPENAI_API_KEY=sk-your-openai-api-key-here
+# Bot de Telegram (terminal separada)
+python app/integrations/telegram_bot.py
 
-# Database Configuration
-DATABASE_URL=sqlite:///./app.db
-
-# Application Settings
-DEBUG=True
-HOST=0.0.0.0
-PORT=8001
+# Frontend (terminal separada)
+cd frontend && npm start
 ```
 
-## 🏗️ Arquitectura del Sistema
-
-### Estructura de Directorios
+## 🏗️ Arquitectura
 
 ```
-agente_vendedor/
-├── app/
-│   ├── api/              # Endpoints REST
-│   │   ├── chat.py       # API de chat principal
-│   │   ├── clientes.py   # Gestión de clientes
-│   │   ├── productos.py  # Gestión de productos
-│   │   └── ventas.py     # Gestión de ventas
-│   ├── core/             # Configuración central
-│   │   ├── database.py   # Configuración BD
-│   │   ├── config.py     # Configuración app
-│   │   └── base_class.py # Clase base para modelos
-│   ├── models/           # Modelos de base de datos
-│   │   ├── producto.py   # Modelo Producto
-│   │   ├── cliente.py    # Modelo Cliente
-│   │   ├── venta.py      # Modelo Venta
-│   │   ├── mensaje.py    # Modelo Mensaje
-│   │   └── chat_control.py # Control de chat
-│   ├── schemas/          # Esquemas Pydantic
-│   ├── services/         # Lógica de negocio
-│   │   ├── rag.py        # Sistema RAG principal
-│   │   ├── rag_clientes.py # RAG de clientes
-│   │   ├── chat_service.py # Servicio de chat
-│   │   └── openai_service.py # Integración OpenAI
-│   ├── integrations/     # Integraciones externas
-│   ├── tasks/           # Tareas background
-│   └── utils/           # Utilidades
-├── tests/               # Tests automatizados
-├── migrations/          # Migraciones de BD
-├── scripts/            # Scripts de utilidad
-└── docs/               # Documentación adicional
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend Web  │    │  Bot Telegram   │    │   API Externa   │
+│   (React TS)    │    │   (Python)      │    │   (REST)        │
+└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
+          │                      │                      │
+          │ HTTP/REST            │ Webhook              │ HTTP
+          │                      │                      │
+          ▼                      ▼                      ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Backend API (FastAPI)                        │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │ Sistema RAG │  │ Gestión     │  │ Validación  │             │
+│  │ (LLM + Vec) │  │ Pedidos     │  │ & Seguridad │             │
+│  └─────────────┘  └─────────────┘  └─────────────┘             │
+└─────────────────────┬───────────────────────────────────────────┘
+                      │
+                      ▼
+            ┌─────────────────┐
+            │   Base de Datos │
+            │    (SQLite)     │
+            └─────────────────┘
 ```
 
-### Flujo de Datos
+## 🔌 API Principales
 
-```mermaid
-graph TD
-    A[Cliente] --> B[API REST]
-    B --> C[Chat Service]
-    C --> D{Tipo de Consulta}
-    D -->|Inventario| E[RAG Inventario]
-    D -->|Cliente| F[RAG Clientes]
-    D -->|Venta| G[Sistema de Ventas]
-    E --> H[Base de Datos]
-    F --> H
-    G --> H
-    H --> I[Respuesta IA]
-    I --> J[Cliente]
-```
-
-## 🔌 API Endpoints
-
-### Chat Principal
+### Chat Inteligente
 ```http
 POST /api/chat/
-Content-Type: application/json
-
 {
-    "mensaje": "qué productos tienen disponibles",
-    "session_id": "unique-session-id"
+    "mensaje": "Quiero 2 extintores de 10 libras",
+    "session_id": "user123"
 }
 ```
 
 ### Gestión de Productos
 ```http
-GET /api/productos/                    # Listar todos los productos
-GET /api/productos/{id}               # Obtener producto específico
-POST /api/productos/                  # Crear nuevo producto
-POST /api/productos/reemplazar_csv    # Carga CSV con categorización automática
-PUT /api/productos/{id}               # Actualizar producto
-DELETE /api/productos/{id}            # Eliminar producto
-```
-
-### Gestión de Clientes
-```http
-GET /api/clientes/                    # Listar clientes
-POST /api/clientes/                   # Crear cliente
-GET /api/clientes/{id}               # Obtener cliente
-PUT /api/clientes/{id}               # Actualizar cliente
+GET /api/productos/                    # Listar productos
+POST /api/productos/reemplazar_csv     # Carga masiva CSV
 ```
 
 ### Gestión de Ventas
 ```http
-GET /api/ventas/                     # Listar ventas
-POST /api/ventas/                    # Crear venta
-GET /api/ventas/{id}                # Obtener venta específica
-GET /api/ventas/exportar-csv        # Exportar ventas a CSV
+GET /api/ventas/                       # Listar ventas
+GET /api/ventas/exportar-csv          # Exportar CSV
 ```
 
-### Sistema de Control AI
-```http
-GET /api/chat-control/sistema/estado  # Obtener estado del Sistema AI
-POST /api/chat-control/sistema/toggle # Cambiar estado del Sistema AI
+## 🧪 Testing
+
+```bash
+# Tests completos
+python test_rag_completo.py           # Sistema RAG
+python test_ventas_completo.py        # Sistema de ventas
+python test_sistema_clientes.py       # Gestión de clientes
+python test_exportacion_csv.py        # Exportación CSV
+
+# Test específico
+python -m pytest tests/ -v
 ```
-
-### Exportación de Datos
-```http
-GET /api/exportar/inventario          # Exportar inventario con categorías
-GET /api/exportar/clientes           # Exportar base de clientes
-GET /api/exportar/ventas             # Exportar ventas
-GET /api/exportar/conversaciones     # Exportar conversaciones RAG
-```
-
-## 📊 Modelos de Datos
-
-### Producto
-```python
-class Producto(Base):
-    id: int
-    nombre: str
-    descripcion: str
-    precio: float
-    stock: int
-    categoria: str           # Campo agregado para categorización
-    activo: bool
-    fecha_actualizacion: datetime
-```
-
-### Cliente
-```python
-class Cliente(Base):
-    id: int
-    nombre: str
-    cedula: str (único)
-    telefono: str
-    email: str
-    direccion: str
-    barrio: str
-    indicaciones_entrega: str
-    fecha_registro: datetime
-```
-
-### Venta
-```python
-class Venta(Base):
-    id: int
-    cliente_id: int
-    productos: JSON
-    total: float
-    estado: str
-    fecha_venta: datetime
-    session_id: str
-```
-
-## 🧠 Sistemas RAG
-
-### RAG de Inventario
-**Función**: Maneja consultas sobre productos y catálogo
-**Capacidades**:
-- Consultas generales: "qué productos tienen", "inventario"
-- Búsquedas específicas: "extintores", "cascos de seguridad"
-- Categorización automática de productos
-- Respuestas estructuradas con precios y disponibilidad
-
-### RAG de Clientes
-**Función**: Gestiona información y datos de clientes
-**Capacidades**:
-- Detección de consultas sobre clientes existentes
-- Validación de datos de contacto
-- Búsqueda por cédula, nombre o teléfono
-- Actualización de información
-
-### Sistema de Detección de Intenciones
-```python
-# Patrones de intención de compra
-PATRONES_COMPRA = [
-    r'necesito \d+',
-    r'quiero \d+',
-    r'comprar \d+',
-    r'me interesan \d+',
-    # ... más patrones
-]
-```
-
-## 🧪 Pruebas
-
-### Ejecutar Pruebas Completas
-   ```bash
-# Prueba del sistema RAG
-python test_rag_simple.py
-
-# Prueba del flujo completo de ventas
-python test_ventas_completo.py
-
-# Prueba del sistema de clientes
-python test_sistema_clientes.py
-
-# Prueba de exportación CSV
-python test_exportacion_csv.py
-```
-
-### Casos de Prueba Incluidos
-- ✅ Consultas de inventario general
-- ✅ Búsquedas de productos específicos
-- ✅ Flujo completo de ventas
-- ✅ Validaciones de datos
-- ✅ Gestión de errores
-- ✅ Exportación de datos
 
 ## 🚀 Despliegue
 
-### Desarrollo Local
-   ```bash
-uvicorn app.main:app --reload --port 8001
+### Docker
+```bash
+# Construir imagen
+docker build -t agente-vendedor .
+
+# Ejecutar contenedor
+docker run -p 8001:8001 --env-file .env agente-vendedor
 ```
 
-### Producción con Docker
-```dockerfile
-FROM python:3.9-slim
+### Producción
+Ver [Deployment Guide](DEPLOYMENT_GUIDE.md) para instrucciones detalladas de:
+- Configuración de PostgreSQL
+- Nginx + SSL
+- Docker Compose
+- Variables de entorno de producción
 
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+## 📊 Estado del Proyecto
 
-COPY . .
-EXPOSE 8001
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
-```
-
-### Variables de Entorno para Producción
-```env
-DEBUG=False
-DATABASE_URL=postgresql://user:password@localhost/agente_vendedor
-OPENAI_API_KEY=your-production-api-key
-```
-
-## 📈 Métricas de Rendimiento
-
-### Resultados de Pruebas Recientes
-- **RAG Inventario General**: 100% efectividad
-- **RAG Productos Específicos**: 98% efectividad
-- **Sistema de Ventas**: 98% efectividad
-- **Validaciones**: 100% efectividad
-- **Tiempo de Respuesta**: < 3 segundos promedio
-- **Uptime**: 99.9% en pruebas
-
-### Capacidades del Sistema
-- **Productos Simultáneos**: Hasta 1000 unidades por producto
-- **Sesiones Concurrentes**: Optimizado para múltiples usuarios
-- **Base de Datos**: SQLite (desarrollo) / PostgreSQL (producción)
-
-## 🛡️ Seguridad
-
-### Validaciones Implementadas
-- Validación de cédula colombiana
-- Validación de email con regex
-- Validación de teléfono (10 dígitos)
-- Sanitización de entradas
-- Control de límites de cantidad
-
-### Buenas Prácticas
-- Variables de entorno para secrets
-- Logging de seguridad
-- Validación de tipos con Pydantic
-- Control de errores robusto
+- ✅ **Backend API**: Completamente funcional
+- ✅ **Sistema RAG**: Implementado y optimizado
+- ✅ **Bot Telegram**: Integración completa
+- ✅ **Gestión de Pedidos**: Flujo completo
+- ✅ **Base de Datos**: Modelos y migraciones
+- ✅ **Frontend Web**: Interfaz React funcional
+- ✅ **Exportación CSV**: Reportes completos
+- ✅ **Tests**: Cobertura principal
+- 🔄 **Documentación**: En actualización continua
 
 ## 🤝 Contribución
 
-### Proceso de Desarrollo
-1. Fork del repositorio
-2. Crear rama feature: `git checkout -b feature/nueva-caracteristica`
-3. Commit cambios: `git commit -am 'Agregar nueva característica'`
-4. Push rama: `git push origin feature/nueva-caracteristica`
-5. Crear Pull Request
-
-### Estándares de Código
-- PEP 8 para Python
-- Documentación en español
-- Tests para nuevas funcionalidades
-- Logging descriptivo
-
-## 📚 Documentación Adicional
-
-### 🏷️ Gestión de Categorías
-- **[GUIA_REGLAS_CATEGORIA_CSV.md](./GUIA_REGLAS_CATEGORIA_CSV.md)** - Reglas de categorización automática en CSV
-- Ejemplos prácticos de carga CSV con y sin categorías
-- Casos de uso y validaciones automáticas
-
-### 🔘 Sistema AI Persistente
-- **[GUIA_BOTON_SISTEMA_AI.md](./GUIA_BOTON_SISTEMA_AI.md)** - Implementación completa del botón Sistema AI
-- Hook React y componente JavaScript listos para usar
-- Estado persistente entre recargas de página
-
-### 🔍 Verificación CSV→RAG
-- **[GUIA_VERIFICACION_CSV_FRONTEND.md](./GUIA_VERIFICACION_CSV_FRONTEND.md)** - Verificación de sincronización
-- Scripts de diagnóstico automático
-- Casos comunes de problemas y soluciones
-
-### 📝 Historial de Cambios
-- **[CHANGELOG.md](./CHANGELOG.md)** - Registro detallado de todas las mejoras
-- Versión 2.3.0 con nuevas funcionalidades implementadas
-- Documentación técnica de migración y cambios
-
-## 📞 Soporte
-
-### Problemas Comunes
-
-**Error de dependencias circulares**
-   ```bash
-# Solución: Verificar imports en app/core/base_class.py
-python -c "from app.models import producto"
-   ```
-
-**Base de datos no inicializada**
-   ```bash
-# Recrear base de datos
-python create_and_migrate.py
-```
-
-**OpenAI API Key inválida**
-```bash
-# Verificar variable de entorno
-echo $OPENAI_API_KEY
-```
+1. Fork el proyecto
+2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
+3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
+4. Push a la rama (`git push origin feature/AmazingFeature`)
+5. Abre un Pull Request
 
 ## 📄 Licencia
 
-Este proyecto está bajo la licencia MIT. Ver [LICENSE](LICENSE) para más detalles.
+Este proyecto está bajo la Licencia MIT - ver el archivo [LICENSE](LICENSE) para detalles.
 
-## 👥 Equipo
+## 🆘 Soporte
 
-Desarrollado con ❤️ para automatizar y optimizar procesos de ventas mediante inteligencia artificial.
+- **Documentación**: [ARQUITECTURA_SISTEMA.md](ARQUITECTURA_SISTEMA.md)
+- **Issues**: GitHub Issues
+- **Email**: soporte@sextinvalle.com
 
 ---
 
-**Versión Actual**: 2.0.0  
-**Última Actualización**: Diciembre 2024  
-**Estado**: ✅ Producción Ready
+**Versión**: 2.0.0  
+**Última actualización**: Diciembre 2024  
+**Desarrollado para**: Sextinvalle - Seguridad Industrial
