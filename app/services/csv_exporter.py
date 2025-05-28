@@ -585,4 +585,129 @@ class CSVExporter:
             
         except Exception as e:
             logging.error(f"Error exportando reporte completo: {e}")
-            return {"exito": False, "error": str(e)} 
+            return {"exito": False, "error": str(e)}
+
+    @staticmethod
+    async def obtener_estadisticas_exportacion(db: AsyncSession) -> Dict[str, Any]:
+        """
+        Obtiene estadísticas completas del sistema para información de exportación
+        
+        Args:
+            db: Sesión de base de datos
+            
+        Returns:
+            Diccionario con estadísticas del sistema
+        """
+        try:
+            from sqlalchemy import func
+            from sqlalchemy.future import select
+            
+            stats = {}
+            
+            # Estadísticas de productos
+            result = await db.execute(select(func.count(Producto.id)))
+            stats["total_productos"] = result.scalar() or 0
+            
+            result = await db.execute(select(func.count(Producto.id)).where(Producto.activo == True))
+            stats["productos_activos"] = result.scalar() or 0
+            
+            result = await db.execute(select(func.count(Producto.id)).where(Producto.stock > 0))
+            stats["productos_con_stock"] = result.scalar() or 0
+            
+            # Estadísticas de clientes
+            result = await db.execute(select(func.count(Cliente.cedula)))
+            stats["total_clientes"] = result.scalar() or 0
+            
+            result = await db.execute(select(func.count(Cliente.cedula)).where(Cliente.activo == True))
+            stats["clientes_activos"] = result.scalar() or 0
+            
+            result = await db.execute(select(func.count(Cliente.cedula)).where(Cliente.total_compras > 0))
+            stats["clientes_con_compras"] = result.scalar() or 0
+            
+            # Estadísticas de ventas
+            result = await db.execute(select(func.count(Venta.id)))
+            stats["total_ventas"] = result.scalar() or 0
+            
+            result = await db.execute(select(func.count(Venta.id)).where(Venta.estado == "completada"))
+            stats["ventas_completadas"] = result.scalar() or 0
+            
+            result = await db.execute(select(func.sum(Venta.total)))
+            stats["valor_total_ventas"] = float(result.scalar() or 0)
+            
+            # Estadísticas de mensajes/conversaciones
+            result = await db.execute(select(func.count(Mensaje.id)))
+            stats["total_mensajes"] = result.scalar() or 0
+            
+            result = await db.execute(select(func.count(Mensaje.id)).where(
+                Mensaje.tipo_mensaje.in_(["inventario", "venta", "contexto", "cliente"])
+            ))
+            stats["mensajes_con_rag"] = result.scalar() or 0
+            
+            result = await db.execute(select(func.count(Mensaje.chat_id.distinct())))
+            stats["total_chats_unicos"] = result.scalar() or 0
+            
+            # Fechas de rango
+            result = await db.execute(select(func.min(Venta.fecha), func.max(Venta.fecha)))
+            fecha_min, fecha_max = result.first()
+            
+            stats["rango_fechas_ventas"] = {
+                "fecha_minima": fecha_min.isoformat() if fecha_min else None,
+                "fecha_maxima": fecha_max.isoformat() if fecha_max else None
+            }
+            
+            # Fechas de rango para mensajes
+            result = await db.execute(select(func.min(Mensaje.timestamp), func.max(Mensaje.timestamp)))
+            fecha_min_msg, fecha_max_msg = result.first()
+            
+            stats["rango_fechas_mensajes"] = {
+                "fecha_minima": fecha_min_msg.isoformat() if fecha_min_msg else None,
+                "fecha_maxima": fecha_max_msg.isoformat() if fecha_max_msg else None
+            }
+            
+            # Promedios y métricas adicionales
+            if stats["total_ventas"] > 0:
+                stats["promedio_valor_venta"] = stats["valor_total_ventas"] / stats["total_ventas"]
+            else:
+                stats["promedio_valor_venta"] = 0
+            
+            if stats["clientes_con_compras"] > 0:
+                stats["promedio_compras_por_cliente"] = stats["total_ventas"] / stats["clientes_con_compras"]
+            else:
+                stats["promedio_compras_por_cliente"] = 0
+            
+            # Tipos de mensaje más comunes
+            result = await db.execute(
+                select(Mensaje.tipo_mensaje, func.count(Mensaje.id))
+                .group_by(Mensaje.tipo_mensaje)
+                .order_by(func.count(Mensaje.id).desc())
+                .limit(5)
+            )
+            
+            tipos_mensaje = []
+            for tipo, count in result.all():
+                tipos_mensaje.append({"tipo": tipo or "sin_tipo", "cantidad": count})
+            
+            stats["tipos_mensaje_mas_comunes"] = tipos_mensaje
+            
+            # Fechas de exportación recomendadas (últimos 30, 90, 365 días)
+            from datetime import datetime, timedelta
+            ahora = datetime.now()
+            
+            stats["filtros_fecha_sugeridos"] = {
+                "ultimo_mes": (ahora - timedelta(days=30)).strftime("%Y-%m-%d"),
+                "ultimos_3_meses": (ahora - timedelta(days=90)).strftime("%Y-%m-%d"),
+                "ultimo_ano": (ahora - timedelta(days=365)).strftime("%Y-%m-%d"),
+                "fecha_actual": ahora.strftime("%Y-%m-%d")
+            }
+            
+            return stats
+            
+        except Exception as e:
+            logging.error(f"Error obteniendo estadísticas de exportación: {e}")
+            return {
+                "error": f"Error obteniendo estadísticas: {str(e)}",
+                "total_productos": 0,
+                "total_clientes": 0,
+                "total_ventas": 0,
+                "total_mensajes": 0
+            } 

@@ -1,8 +1,3 @@
-# Archivos de entorno
-.env
-.env.*
-!.env.example
-
 # Python
 __pycache__/
 *.py[cod]
@@ -21,62 +16,102 @@ parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Entornos virtuales
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Virtual environments
 venv/
 env/
 ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
 
 # Logs
 *.log
 logs/
-log/
 
-# Archivos de IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-.DS_Store
-
-# Archivos de base de datos
-*.db
-*.sqlite3
-
-# Archivos temporales
+# Temporary files
+tmp/
+temp/
 *.tmp
-*.temp
-.coverage
-htmlcov/
 
-# Archivos de caché
-.cache/
-.pytest_cache/
-.mypy_cache/
+# Node modules (if any)
+node_modules/
 
-# Archivos de FAISS
-*.index
-*.faiss
+# Alembic
+alembic/versions/*.pyc
 
-# Archivos de audio/imagen temporales
-temp_*.ogg
-temp_*.jpg
-temp_*.png
-temp_*.mp3
-temp_*.wav
+# FastAPI
+.fastapi_cache/
 
-# Archivos de migración (excepto la inicial)
-alembic/versions/*
-!alembic/versions/.gitkeep
+# Jupyter Notebook
+.ipynb_checkpoints
 
-# Archivos de test y debugging
-test_*.py
-debug_*.py
-verificar_*.py
-crear_pedidos_demo.py
-comparacion_*.py
-dashboard_*.html
-REPORTE_*.md 
+# Archived directories (no longer tracked)
+tests-archive/
+docs-archive/
+scripts-archive/
+
+# Export files (generated)
+exports/*.csv
+exports/*.xlsx
+exports/*.json
+
+# Backup files
+*.bak
+*.backup 

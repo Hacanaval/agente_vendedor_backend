@@ -1,6 +1,8 @@
+from __future__ import annotations
 from typing import Any, Dict, Optional
 import logging
 import re
+import asyncio
 from sqlalchemy.future import select
 from app.services.llm_client import generar_respuesta
 from app.services.retrieval.retriever_factory import get_retriever
@@ -10,6 +12,15 @@ from app.services.prompts import prompt_ventas, prompt_empresa
 from app.services.contextos import CONTEXTO_EMPRESA_SEXTINVALLE
 from app.services.pedidos import PedidoManager
 from app.services.rag_clientes import RAGClientes
+from app.services.rag_ventas import RAGVentas
+from app.core.exceptions import RAGException, TimeoutException, DatabaseException
+
+# Configuración de timeouts
+RAG_TIMEOUT_SECONDS = 15  # Reducido de 30 a 15 segundos
+RETRIEVAL_TIMEOUT_SECONDS = 5  # Timeout específico para retrieval
+LLM_TIMEOUT_SECONDS = 10  # Timeout específico para LLM
+
+logger = logging.getLogger(__name__)
 
 async def consultar_rag(
     mensaje: str,
@@ -22,656 +33,372 @@ async def consultar_rag(
     usuario_id: int = None,
     llm: str = "gemini",
     chat_id: str = None,
+    timeout_seconds: int = RAG_TIMEOUT_SECONDS,
     **kwargs
-) -> dict:
+) -> Dict[str, Any]:
     """
-    Pipeline RAG: retrieval, generación y respuesta.
+    Pipeline RAG centralizado: retrieval, generación y respuesta con sistemas especializados.
     """
     try:
-        # Memoria conversacional reciente (últimos 10 mensajes)
-        historial_contexto = ""
-        estado_pedido = {"tiene_pedido": False}
-        
-        if chat_id:
-            result = await db.execute(
-                select(Mensaje)
-                .where(Mensaje.chat_id == chat_id)
-                .order_by(Mensaje.timestamp.desc())
-                .limit(10)
-            )
-            historial = result.scalars().all()[::-1]  # Orden cronológico
-            historial_contexto = "\n".join([
-                f"{m.remitente}: {m.mensaje}" + 
-                (f" (Estado: {m.estado_venta})" if m.estado_venta else "")
-                for m in historial
-            ])
-            logging.info(f"[consultar_rag] Historial de conversación: {historial_contexto[:300]}...")
-            
-            # Obtener estado del pedido actual
-            estado_pedido = await PedidoManager.obtener_estado_pedido(chat_id, db)
-            
-            # Verificar si el usuario está pidiendo ver su pedido
-            if any(palabra in mensaje.lower() for palabra in ["mi pedido", "pedido actual", "mostrar pedido", "ver pedido", "resumen pedido"]):
-                pedido_actual = await PedidoManager.mostrar_pedido_actual(chat_id, db)
-                if pedido_actual:
-                    productos_texto = "\n".join([
-                        f"- {p['producto']} x{p['cantidad']} = ${p['total']:,.0f}"
-                        for p in pedido_actual['productos']
-                    ])
-                    datos_cliente = pedido_actual['datos_cliente']
-                    datos_texto = "\n".join([f"- {k}: {v}" for k, v in datos_cliente.items() if v])
-                    
-                    respuesta_pedido = f"📋 **Tu pedido actual:**\n\n**Productos:**\n{productos_texto}\n\n**Total: ${pedido_actual['total']:,.0f}**"
-                    
-                    if datos_cliente:
-                        respuesta_pedido += f"\n\n**Datos registrados:**\n{datos_texto}"
-                    
-                    if pedido_actual['campos_faltantes']:
-                        respuesta_pedido += f"\n\n⚠️ **Faltan datos:** {', '.join(pedido_actual['campos_faltantes'])}"
-                    
-                    return {
-                        "respuesta": respuesta_pedido,
-                        "estado_venta": pedido_actual['estado'],
-                        "tipo_mensaje": "venta",
-                        "metadatos": pedido_actual
-                    }
-                else:
-                    return {
-                        "respuesta": "No tienes ningún pedido activo en este momento. ¿Te gustaría ver nuestros productos disponibles?",
-                        "estado_venta": None,
-                        "tipo_mensaje": "venta",
-                        "metadatos": None
-                    }
-
-        # NUEVO: Detectar consultas de historial de clientes
-        # TEMPORALMENTE DESACTIVADO COMPLETAMENTE para testing
-        """
-        deteccion_cliente = await RAGClientes.detectar_consulta_cliente(mensaje)
-        
-        if deteccion_cliente["es_consulta_cliente"]:
-            logging.info(f"[consultar_rag] Detectada consulta de cliente: {deteccion_cliente}")
-            
-            if deteccion_cliente["cedula_detectada"]:
-                # Consulta específica con cédula
-                cedula = deteccion_cliente["cedula_detectada"]
-                
-                if deteccion_cliente["tipo_consulta"] == "estadisticas":
-                    resultado = await RAGClientes.obtener_estadisticas_cliente(cedula, db, llm)
-                else:
-                    resultado = await RAGClientes.consultar_historial_cliente(cedula, mensaje, db, llm)
-                
-                return {
-                    "respuesta": resultado["respuesta"],
-                    "estado_venta": None,
-                    "tipo_mensaje": "cliente",
-                    "metadatos": {
-                        "tipo_consulta_cliente": deteccion_cliente["tipo_consulta"],
-                        "cedula": cedula,
-                        "encontrado": resultado.get("encontrado", False)
-                    }
-                }
-            
-            elif deteccion_cliente["tipo_consulta"] == "busqueda":
-                # Buscar cliente por nombre
-                # Extraer nombre del mensaje
-                palabras = mensaje.split()
-                nombre_busqueda = " ".join([p for p in palabras if not p.isdigit() and p.lower() not in ["buscar", "cliente", "encontrar", "información", "de", "del"]])
-                
-                if nombre_busqueda:
-                    resultado = await RAGClientes.buscar_cliente_por_nombre(nombre_busqueda, db)
-                    
-                    return {
-                        "respuesta": resultado["respuesta"],
-                        "estado_venta": None,
-                        "tipo_mensaje": "cliente",
-                        "metadatos": {
-                            "tipo_consulta_cliente": "busqueda",
-                            "termino_busqueda": nombre_busqueda,
-                            "clientes_encontrados": resultado.get("total", 0)
-                        }
-                    }
-                else:
-                    return {
-                        "respuesta": "Para buscar un cliente, proporciona su nombre o cédula. Ejemplo: 'Buscar cliente Juan Pérez' o 'Cliente 12345678'",
-                        "estado_venta": None,
-                        "tipo_mensaje": "cliente",
-                        "metadatos": {"error": "falta_termino_busqueda"}
-                    }
-            else:
-                return {
-                    "respuesta": "Para consultar información de un cliente, proporciona su cédula. Ejemplo: 'Historial del cliente 12345678' o 'Estadísticas del cliente 12345678'",
-                    "estado_venta": None,
-                    "tipo_mensaje": "cliente",
-                    "metadatos": {"error": "falta_cedula"}
-                }
-        """
-
-        # Retrieval según tipo de consulta
-        logging.info(f"[consultar_rag] Tipo de consulta recibido: {tipo}")
-        if tipo in ("inventario", "venta"):
-            contexto = await retrieval_inventario(mensaje, db)
-            # Información del pedido actual para el contexto
-            info_pedido = ""
-            if estado_pedido["tiene_pedido"]:
-                productos_pedido = estado_pedido["productos"]
-                total_pedido = sum(p["total"] for p in productos_pedido)
-                info_pedido = f"\nPEDIDO ACTUAL DEL CLIENTE:\n"
-                for p in productos_pedido:
-                    info_pedido += f"- {p['producto']} x{p['cantidad']} = ${p['total']:,.0f}\n"
-                info_pedido += f"Total del pedido: ${total_pedido:,.0f}\n"
-                
-                if estado_pedido["campos_faltantes"]:
-                    info_pedido += f"Datos faltantes: {', '.join(estado_pedido['campos_faltantes'])}\n"
-            
-            instrucciones_extra = instrucciones + (
-                "\nIMPORTANTE:\n1. Si el contexto empieza con 'PRODUCTOS_DISPONIBLES:', presenta SIEMPRE toda esa lista de productos al cliente de manera organizada y atractiva.\n"
-                "2. Si no hay productos específicos para una búsqueda, responde claramente que no tenemos productos disponibles para esa consulta particular.\n"
-                "3. No inventes ni sugieras productos fuera del inventario proporcionado.\n"
-                f"4. Historial reciente de la conversación:\n{historial_contexto}\n"
-                f"{info_pedido}"
-            )
-            system_prompt, user_prompt = prompt_ventas(
-                contexto=contexto,
-                mensaje=mensaje,
-                nombre_agente=nombre_agente,
-                nombre_empresa=nombre_empresa,
-                tono=tono,
-                instrucciones=instrucciones_extra
-            )
-            logging.info(f"[consultar_rag] Contexto inventario obtenido: {contexto[:200]}...")
-        elif tipo == "contexto":
-            contexto = await retrieval_contexto_empresa(mensaje, db)
-            if not contexto or contexto.strip() == "":
-                contexto = "No se encontró información relevante sobre la empresa."
-            instrucciones_extra = instrucciones + (
-                f"\nHistorial reciente de la conversación:\n{historial_contexto}\n"
-            )
-            system_prompt, user_prompt = prompt_empresa(
-                contexto=contexto,
-                mensaje=mensaje,
-                nombre_agente=nombre_agente,
-                nombre_empresa=nombre_empresa,
-                tono=tono,
-                instrucciones=instrucciones_extra
-            )
-            logging.info(f"[consultar_rag] Contexto empresa obtenido: {contexto[:200]}...")
-        else:
-            return {
-                "respuesta": "Lo siento, no entendí tu pregunta. ¿Puedes reformularla o ser más específico?",
-                "estado_venta": None,
-                "tipo_mensaje": tipo,
-                "metadatos": None
-            }
-
-        # LLM (responde usando prompt)
-        respuesta = await generar_respuesta(
-            prompt=user_prompt,
-            system_prompt=system_prompt,
-            llm=llm
+        # Ejecutar con timeout global
+        return await asyncio.wait_for(
+            _consultar_rag_internal(
+                mensaje, tipo, db, nombre_agente, nombre_empresa, 
+                tono, instrucciones, usuario_id, llm, chat_id, **kwargs
+            ),
+            timeout=timeout_seconds
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"Timeout en consultar_rag después de {timeout_seconds}s para mensaje: {mensaje[:100]}")
+        raise TimeoutException("consultar_rag", timeout_seconds)
+    except Exception as e:
+        logger.error(f"Error en consultar_rag: {str(e)}", exc_info=True)
+        raise RAGException(
+            message=f"Error en pipeline RAG: {str(e)[:100]}",
+            rag_type=tipo,
+            details={"mensaje_length": len(mensaje), "chat_id": chat_id}
         )
 
-        # Procesamiento de ventas y gestión de pedidos
-        estado_venta = None
-        metadatos = None
+
+async def _consultar_rag_internal(
+    mensaje: str,
+    tipo: str,
+    db,
+    nombre_agente: str,
+    nombre_empresa: str,
+    tono: str,
+    instrucciones: str,
+    usuario_id: int,
+    llm: str,
+    chat_id: str,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Implementación interna del pipeline RAG con sistemas especializados.
+    """
+    try:
+        logger.info(f"[RAG] Procesando consulta tipo '{tipo}': {mensaje[:50]}...")
         
-        # Procesamiento especial cuando hay pedido activo (INDEPENDIENTE del tipo clasificado)
-        if chat_id and estado_pedido["tiene_pedido"] and estado_pedido["campos_faltantes"]:
-            # PRIMERO: Verificar si el mensaje contiene intención de agregar más productos
-            palabras_agregar_producto = ["también", "además", "agregar", "añadir", "quiero", "necesito", "comprar", "cotizar"]
-            es_agregar_producto = any(palabra in mensaje.lower() for palabra in palabras_agregar_producto)
-            
-            # Verificar si hay productos mencionados en el mensaje
-            producto_detectado, cantidad_detectada = await extraer_producto_cantidad(mensaje, db)
-            tiene_producto = producto_detectado is not None and cantidad_detectada is not None
-            
-            # Si es claramente una intención de agregar producto, procesarlo como venta
-            if es_agregar_producto and tiene_producto:
-                logging.info(f"[consultar_rag] Detectado intento de agregar producto adicional: {mensaje}")
-                # No procesar como datos del cliente, dejar que se procese como venta más abajo
-                pass
-            else:
-                # Si hay pedido activo y faltan datos, procesar como recolección de datos
-                campo_detectado = await detectar_campo_cliente(mensaje, estado_pedido["campos_faltantes"])
+        # Memoria conversacional reciente (últimos 10 mensajes)
+        historial_contexto = ""
+        
+        if chat_id:
+            try:
+                # Timeout para consultas de historial
+                result = await asyncio.wait_for(
+                    db.execute(
+                        select(Mensaje)
+                        .where(Mensaje.chat_id == chat_id)
+                        .order_by(Mensaje.timestamp.desc())
+                        .limit(10)
+                    ),
+                    timeout=3.0  # Timeout corto para BD
+                )
+                historial = result.scalars().all()[::-1]  # Orden cronológico
+                historial_contexto = "\n".join([
+                    f"{m.remitente}: {m.mensaje}" + 
+                    (f" (Estado: {m.estado_venta})" if m.estado_venta else "")
+                    for m in historial
+                ])
+                logger.info(f"[RAG] Historial obtenido: {len(historial)} mensajes")
                 
-                if campo_detectado:
-                    logging.info(f"[consultar_rag] Campo detectado: {campo_detectado} para mensaje: {mensaje}")
-                    
-                    resultado = await PedidoManager.actualizar_datos_cliente(
-                        chat_id=chat_id,
-                        campo=campo_detectado,
-                        valor=mensaje.strip(),
-                        db=db
-                    )
-                    
-                    if resultado["exito"]:
-                        estado_venta = "recolectando_datos"
-                        metadatos = {
-                            "campos_faltantes": resultado["campos_faltantes"],
-                            "datos_completos": resultado["datos_completos"]
-                        }
-                        
-                        # Actualizar respuesta para confirmar el dato recibido
-                        campo_nombres = {
-                            "nombre_completo": "nombre",
-                            "cedula": "cédula",
-                            "telefono": "teléfono",
-                            "correo": "correo electrónico",
-                            "direccion": "dirección",
-                            "barrio": "barrio",
-                            "indicaciones_adicionales": "indicaciones adicionales"
-                        }
-                        
-                        respuesta = f"✅ Perfecto, he registrado tu {campo_nombres.get(campo_detectado, campo_detectado)}: {mensaje.strip()}"
-                        
-                        if resultado["campos_faltantes"]:
-                            siguiente_campo = resultado["campos_faltantes"][0]
-                            respuesta += f"\n\nAhora necesito tu {campo_nombres.get(siguiente_campo, siguiente_campo)}."
-                        
-                        # Si todos los datos están completos, usar mensaje de finalización
-                        if resultado["datos_completos"] and resultado.get("pedido_finalizado"):
-                            estado_venta = "cerrada"
-                            metadatos = resultado
-                            respuesta = resultado.get("mensaje_finalizacion", "Tu pedido ha sido registrado exitosamente. Pronto te contactaremos para coordinar la entrega. ¡Gracias por confiar en Sextinvalle!")
-                            
-                            if resultado.get("ventas_creadas"):
-                                logging.info(f"Pedido finalizado con {resultado['total_ventas']} ventas creadas")
-                        
-                        return {
-                            "respuesta": respuesta,
-                            "estado_venta": estado_venta,
-                            "tipo_mensaje": "venta",
-                            "metadatos": metadatos
-                        }
-                    else:
-                        # Manejar errores de validación
-                        if resultado.get("tipo_error") == "validacion":
-                            return {
-                                "respuesta": resultado["error"],
-                                "estado_venta": "recolectando_datos",
-                                "tipo_mensaje": "venta",
-                                "metadatos": {"error_validacion": True, "campo": resultado.get("campo")}
-                            }
-                        else:
-                            logging.error(f"[consultar_rag] Error actualizando datos del cliente: {resultado}")
-                            return {
-                                "respuesta": "Hubo un error procesando tu información. Por favor, intenta de nuevo.",
-                                "estado_venta": "recolectando_datos", 
-                                "tipo_mensaje": "venta",
-                                "metadatos": {"error": True}
-                            }
-                else:
-                    logging.warning(f"[consultar_rag] No se pudo detectar campo para mensaje: {mensaje}")
+            except asyncio.TimeoutError:
+                logger.warning("Timeout obteniendo historial, continuando sin historial")
+                historial_contexto = ""
+            except Exception as e:
+                logger.error(f"Error obteniendo historial: {str(e)}")
+                historial_contexto = ""
 
-        if tipo == "venta" and chat_id:
-            # Detectar intención de compra y extraer productos (incluyendo productos adicionales)
-            palabras_intencion_compra = ["quiero", "necesito", "comprar", "cotizar", "precio de", "también", "además", "agregar", "añadir"]
-            if any(palabra in mensaje.lower() for palabra in palabras_intencion_compra):
-                logging.info(f"[consultar_rag] Detectada intención de compra en: {mensaje}")
-                
-                # Intentar extraer producto y cantidad del mensaje
-                producto_detectado, cantidad_detectada = await extraer_producto_cantidad(mensaje, db)
-                logging.info(f"[consultar_rag] Producto detectado: {producto_detectado}, Cantidad: {cantidad_detectada}")
-                
-                # Manejar errores de validación de cantidad
-                if isinstance(producto_detectado, dict) and "error" in producto_detectado:
-                    logging.error(f"[consultar_rag] Error en validación de cantidad: {producto_detectado}")
-                    return {
-                        "respuesta": producto_detectado["error"],
-                        "estado_venta": None,
-                        "tipo_mensaje": tipo,
-                        "metadatos": {"error_validacion": True}
-                    }
-                
-                if producto_detectado and cantidad_detectada:
-                    logging.info(f"[consultar_rag] Llamando a agregar_producto_pedido...")
-                    
-                    # Agregar producto al pedido
-                    resultado_pedido = await PedidoManager.agregar_producto_pedido(
-                        chat_id=chat_id,
-                        producto=producto_detectado["nombre"],
-                        cantidad=cantidad_detectada,
-                        precio=producto_detectado["precio"],
-                        db=db,
-                        producto_id=producto_detectado["id"]
-                    )
-                    
-                    logging.info(f"[consultar_rag] Resultado de agregar_producto_pedido: {resultado_pedido}")
-                    
-                    if resultado_pedido["exito"]:
-                        estado_venta = "pendiente"
-                        metadatos = {
-                            "productos": resultado_pedido["productos"],
-                            "total": resultado_pedido["total"]
-                        }
-                        logging.info(f"Producto agregado al pedido: {producto_detectado['nombre']} x{cantidad_detectada}")
-                        
-                        # Generar respuesta natural basada en el contexto
-                        if any(palabra in mensaje.lower() for palabra in ["también", "además", "agregar", "añadir"]):
-                            respuesta = f"Perfecto, he agregado {cantidad_detectada} {producto_detectado['nombre']} a tu pedido.\n\n"
-                            respuesta += f"Tu pedido ahora incluye {len(resultado_pedido['productos'])} productos por un total de ${resultado_pedido['total']:,.0f}.\n\n"
-                            respuesta += "¿Te gustaría agregar algo más o procedemos con este pedido?"
-                        else:
-                            # Primera vez agregando producto
-                            respuesta = f"Excelente, he agregado {cantidad_detectada} {producto_detectado['nombre']} a tu pedido por un total de ${resultado_pedido['total']:,.0f}.\n\n"
-                            respuesta += "¿Deseas agregar algún otro producto o procedemos con este pedido?"
-                        
-                        # IMPORTANTE: Retornar inmediatamente para evitar que se sobrescriba la respuesta
-                        return {
-                            "respuesta": respuesta,
-                            "estado_venta": estado_venta,
-                            "tipo_mensaje": tipo,
-                            "metadatos": metadatos
-                        }
-                    else:
-                        logging.error(f"[consultar_rag] Error agregando producto: {resultado_pedido}")
-                else:
-                    logging.warning(f"[consultar_rag] No se detectó producto o cantidad válida")
+        # 🔥 SISTEMA RAG_VENTAS CENTRALIZADO - Para todas las consultas de venta/inventario
+        if tipo in ["inventario", "venta", "producto", "compra"]:
+            logger.info(f"[RAG] Delegando a RAG_VENTAS centralizado")
             
-            # Detectar confirmación de compra (incluyendo mensajes con "dame las X unidades")
-            elif (any(palabra in mensaje.lower() for palabra in ["sí", "confirmo", "acepto", "está bien", "perfecto", "solo eso", "nada más", "dame"]) or
-                  ("dame" in mensaje.lower() and any(palabra in mensaje.lower() for palabra in ["unidades", "unidad"]))):
-                estado_actual = await PedidoManager.obtener_estado_pedido(chat_id, db)
-                if estado_actual["tiene_pedido"]:
-                    estado_venta = "recolectando_datos"  # Cambiar a recolectando_datos para iniciar el flujo
-                    metadatos = estado_actual
-                    
-                    # Agregar mensaje para solicitar el primer campo
-                    campos_faltantes = estado_actual.get("campos_faltantes", PedidoManager.CAMPOS_REQUERIDOS)
-                    if campos_faltantes:
-                        primer_campo = campos_faltantes[0]
-                        campo_nombres = {
-                            "nombre_completo": "nombre completo",
-                            "cedula": "cédula",
-                            "telefono": "teléfono",
-                            "correo": "correo electrónico",
-                            "direccion": "dirección",
-                            "barrio": "barrio",
-                            "indicaciones_adicionales": "indicaciones adicionales"
-                        }
-                        respuesta = f"Perfecto, procederemos con tu pedido.\n\nPara coordinar la entrega, necesito algunos datos. ¿Podrías proporcionarme tu {campo_nombres.get(primer_campo, primer_campo)}?"
-                        
-                        return {
-                            "respuesta": respuesta,
-                            "estado_venta": estado_venta,
-                            "tipo_mensaje": "venta",
-                            "metadatos": metadatos
-                        }
+            # Obtener contexto de inventario 
+            try:
+                contexto_inventario = await asyncio.wait_for(
+                    retrieval_inventario(mensaje, db),
+                    timeout=RETRIEVAL_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Timeout en retrieval de inventario")
+                contexto_inventario = "No se pudo acceder al inventario por timeout"
+            except Exception as e:
+                logger.error(f"Error en retrieval de inventario: {e}")
+                contexto_inventario = "Error accediendo al inventario"
             
-            # Estado por defecto basado en heurística
-            if not estado_venta:
-                if any(x in respuesta.lower() for x in ["¿deseas", "quieres confirmar", "te gustaría agregarlo", "confirmar pedido"]):
-                    estado_venta = "pendiente"
-                elif any(x in respuesta.lower() for x in ["pedido registrado", "compra confirmada", "venta realizada"]):
-                    estado_venta = "cerrada"
-                elif any(x in mensaje.lower() for x in ["cotización", "precio", "costo"]):
-                    estado_venta = "iniciada"
+            # DELEGAR A RAG_VENTAS
+            return await RAGVentas.procesar_consulta_venta(
+                mensaje=mensaje,
+                chat_id=chat_id,
+                db=db,
+                contexto_inventario=contexto_inventario,
+                historial_contexto=historial_contexto,
+                nombre_agente=nombre_agente,
+                nombre_empresa=nombre_empresa,
+                tono=tono,
+                instrucciones=instrucciones,
+                llm=llm
+            )
 
-        return {
-            "respuesta": respuesta,
-            "estado_venta": estado_venta,
-            "tipo_mensaje": tipo,
-            "metadatos": metadatos
-            }
+        # 🔥 SISTEMA RAG_CLIENTES - Para consultas de cliente
+        elif tipo == "cliente":
+            logger.info(f"[RAG] Delegando a RAG_CLIENTES")
+            try:
+                return await RAGClientes.procesar_consulta_cliente(
+                    mensaje, db, nombre_agente, nombre_empresa, tono, instrucciones, llm
+                )
+            except Exception as e:
+                logger.error(f"Error en RAG_CLIENTES: {e}")
+                return {
+                    "respuesta": "Hubo un error procesando tu consulta de cliente. Por favor, intenta de nuevo.",
+                    "estado_venta": None,
+                    "tipo_mensaje": "cliente",
+                    "metadatos": {"error": True, "subsistema": "RAG_CLIENTES"}
+                }
 
+        # 🔥 SISTEMA RAG_EMPRESA - Para consultas generales
+        elif tipo in ["empresa", "general"]:
+            logger.info(f"[RAG] Procesando consulta de empresa/general")
+            try:
+                contexto_empresa = await asyncio.wait_for(
+                    retrieval_contexto_empresa(mensaje, db),
+                    timeout=RETRIEVAL_TIMEOUT_SECONDS
+                )
+                
+                # Generar respuesta usando contexto de empresa
+                system_prompt, user_prompt = prompt_empresa(
+                    contexto=contexto_empresa,
+                    mensaje=mensaje,
+                    nombre_agente=nombre_agente,
+                    nombre_empresa=nombre_empresa,
+                    tono=tono,
+                    instrucciones=instrucciones
+                )
+                
+                respuesta = await asyncio.wait_for(
+                    generar_respuesta(user_prompt, llm, system_prompt, temperatura=0.5),
+                    timeout=LLM_TIMEOUT_SECONDS
+                )
+                
+                return {
+                    "respuesta": respuesta,
+                    "estado_venta": None,
+                    "tipo_mensaje": "empresa",
+                    "metadatos": {"contexto_empresa": bool(contexto_empresa)}
+                }
+                
+            except asyncio.TimeoutError:
+                logger.warning("Timeout en RAG_EMPRESA")
+                return {
+                    "respuesta": "Lo siento, el sistema está experimentando demoras. Estamos aquí para ayudarte con información sobre Sextinvalle.",
+                    "estado_venta": None,
+                    "tipo_mensaje": "empresa",
+                    "metadatos": {"timeout": True}
+                }
+            except Exception as e:
+                logger.error(f"Error en RAG_EMPRESA: {e}")
+                return {
+                    "respuesta": "Hubo un error procesando tu consulta. ¿En qué puedo ayudarte sobre Sextinvalle?",
+                    "estado_venta": None,
+                    "tipo_mensaje": "empresa", 
+                    "metadatos": {"error": True, "subsistema": "RAG_EMPRESA"}
+                }
+        
+        # Si no coincide con ningún tipo conocido, usar RAG_VENTAS por defecto
+        else:
+            logger.warning(f"[RAG] Tipo desconocido '{tipo}', delegando a RAG_VENTAS")
+            try:
+                contexto_inventario = await asyncio.wait_for(
+                    retrieval_inventario(mensaje, db),
+                    timeout=RETRIEVAL_TIMEOUT_SECONDS
+                )
+            except:
+                contexto_inventario = ""
+                
+            return await RAGVentas.procesar_consulta_venta(
+                mensaje=mensaje,
+                chat_id=chat_id,
+                db=db,
+                contexto_inventario=contexto_inventario,
+                historial_contexto=historial_contexto,
+                nombre_agente=nombre_agente,
+                nombre_empresa=nombre_empresa,
+                tono=tono,
+                instrucciones=instrucciones,
+                llm=llm
+            )
+                
     except Exception as e:
-        logging.error(f"[consultar_rag] Error: {str(e)}")
+        logger.error(f"Error crítico en _consultar_rag_internal: {str(e)}", exc_info=True)
         return {
-            "respuesta": "Lo siento, hubo un error al procesar tu consulta. Por favor, intenta de nuevo.",
+            "respuesta": "Lo siento, ocurrió un error interno. Por favor, intenta nuevamente o contacta soporte.",
             "estado_venta": None,
-            "tipo_mensaje": tipo,
-            "metadatos": None
+            "tipo_mensaje": "error",
+            "metadatos": {"error_critico": True, "tipo_original": tipo}
         }
 
 async def retrieval_inventario(mensaje: str, db):
     """
-    Recupera productos relevantes usando búsqueda híbrida mejorada.
-    Maneja consultas generales, específicas y múltiples productos.
+    Recupera productos relevantes usando búsqueda optimizada.
+    Versión mejorada que soluciona problemas de contexto.
     """
     try:
-        logging.info(f"[retrieval_inventario] Procesando consulta: '{mensaje}'")
+        logger.info(f"[retrieval_inventario] Procesando consulta: '{mensaje}'")
         
         # 1. DETECTAR CONSULTAS GENERALES (mostrar todo)
         consultas_generales = [
             "qué tienen", "que tienen", "productos disponibles", "qué productos", 
-            "que productos", "catálogo", "inventario", "lista", "tienen disponible",
-            "qué venden", "que venden", "mostrar productos", "ver productos",
-            "disponibles", "ofrecen", "manejan", "venden", "productos",
-            "todo lo que tienen", "que hay", "que tiene", "mostrar todo",
-            "ver todo", "todo disponible", "que ofrecen", "que manejan"
+            "que productos", "catálogo", "inventario", "lista", "productos",
+            "todo lo que tienen", "mostrar productos", "ver productos", "precios"
         ]
         
         mensaje_lower = mensaje.lower()
         es_consulta_general = any(patron in mensaje_lower for patron in consultas_generales)
         
-        # DEBUGGING detección
-        logging.info(f"[retrieval_inventario] Mensaje: '{mensaje}' | Lower: '{mensaje_lower}' | Es general: {es_consulta_general}")
-        if not es_consulta_general:
-            logging.info(f"[retrieval_inventario] Patrones evaluados: {[patron for patron in consultas_generales if patron in mensaje_lower]}")
-        
         if es_consulta_general:
-            logging.info(f"[retrieval_inventario] DETECTADA CONSULTA GENERAL: '{mensaje}'")
+            logger.info(f"[retrieval_inventario] DETECTADA CONSULTA GENERAL")
             
-            # Obtener TODOS los productos activos de la base de datos
+            # Obtener productos activos de la base de datos
             try:
                 result = await db.execute(
-                select(Producto).where(
-                    Producto.activo == True,
-                    Producto.stock > 0
-                    ).order_by(Producto.nombre)
+                    select(Producto).where(
+                        Producto.activo == True,
+                        Producto.stock > 0
+                    ).order_by(Producto.nombre).limit(20)
                 )
-                todos_productos = result.scalars().all()
+                productos = result.scalars().all()
                 
-                if not todos_productos:
+                if not productos:
                     return "Lo siento, actualmente no tenemos productos disponibles en nuestro inventario."
                 
-                # Agrupar productos por categorías
-                categorias = {}
-                for producto in todos_productos:
-                    # Determinar categoría basada en el nombre del producto
-                    nombre_lower = producto.nombre.lower()
-                    if "extintor" in nombre_lower:
-                        categoria = "🧯 **Extintores**"
-                    elif "casco" in nombre_lower or "bota" in nombre_lower or "guante" in nombre_lower or "chaleco" in nombre_lower:
-                        categoria = "🦺 **Equipos de Protección Personal**"
-                    elif "linterna" in nombre_lower or "señal" in nombre_lower or "detector" in nombre_lower:
-                        categoria = "🔦 **Señalización y Seguridad**"
-                    elif "botiquín" in nombre_lower or "candado" in nombre_lower or "manta" in nombre_lower:
-                        categoria = "🛡️ **Seguridad y Emergencias**"
-                    elif "alicate" in nombre_lower or "martillo" in nombre_lower or "taladro" in nombre_lower:
-                        categoria = "🔧 **Herramientas**"
-                    elif "televisor" in nombre_lower:
-                        categoria = "📺 **Equipos Audiovisuales**"
-                    else:
-                        categoria = "📦 **Otros Productos**"
-                    
-                    if categoria not in categorias:
-                        categorias[categoria] = []
-                    
+                # Respuesta simple y directa
+                respuesta_partes = ["PRODUCTOS_DISPONIBLES: Nuestros productos principales:\n"]
+                
+                for producto in productos:
                     disponibilidad = "✅ Disponible" if producto.stock > 10 else "⚠️ Stock limitado"
-                    categorias[categoria].append(f"• {producto.nombre} - ${producto.precio:,.0f} ({disponibilidad})")
-                
-                # Construir respuesta formateada
-                respuesta_partes = ["PRODUCTOS_DISPONIBLES: Catálogo completo de Sextinvalle:\n"]
-                
-                for categoria, productos_cat in categorias.items():
-                    respuesta_partes.append(f"{categoria}:")
-                    respuesta_partes.extend(productos_cat)
-                    respuesta_partes.append("")  # Línea en blanco entre categorías
+                    respuesta_partes.append(f"• {producto.nombre} - ${producto.precio:,.0f} ({disponibilidad})")
                 
                 return "\n".join(respuesta_partes)
                 
             except Exception as e:
-                logging.error(f"[retrieval_inventario] Error consultando productos para catálogo general: {e}")
+                logger.error(f"[retrieval_inventario] Error consultando productos: {e}")
                 return "Error al obtener el catálogo de productos. Por favor, intenta de nuevo."
         
-        # 2. BÚSQUEDA ESPECÍFICA DE PRODUCTOS
-        # Extraer palabras clave del mensaje
-        palabras_busqueda = mensaje_lower.split()
-        
-        # Filtrar palabras irrelevantes y mantener solo las importantes
+        # 2. BÚSQUEDA ESPECÍFICA DE PRODUCTOS - MEJORADA
+        # Extraer solo palabras clave relevantes, ignorando palabras comunes
         palabras_irrelevantes = {
-            "tienen", "tienes", "hay", "venden", "vendes", "necesito", "quiero", 
-            "busco", "me", "un", "una", "unos", "unas", "el", "la", "los", "las",
-            "de", "del", "en", "con", "para", "por", "que", "qué", "como", "cómo",
-            "dónde", "donde", "cuánto", "cuanto", "cuál", "cual", "cuáles", "cuales",
-            "favor", "por", "ayuda", "ayudar", "información", "info", "ser", "más",
-            "puede", "pueden", "podría", "podrías", "decir", "decirme", "saber",
-            "hola", "buenos", "días", "tardes", "noches", "gracias"
+            "hola", "necesito", "información", "sobre", "quiero", "quisiera", 
+            "me", "puedes", "podrías", "ayudar", "con", "para", "del", "de", "la", "el",
+            "busco", "buscando", "tengo", "dime", "cuales", "cuáles", "son", "hay"
         }
         
-        # Limpiar signos de puntuación de las palabras
-        import re
-        palabras_limpias = []
+        # Filtrar palabras relevantes de al menos 3 caracteres y que no sean irrelevantes
+        palabras_busqueda = [
+            palabra for palabra in mensaje_lower.split() 
+            if len(palabra) >= 3 and palabra not in palabras_irrelevantes
+        ]
+        
+        if not palabras_busqueda:
+            return "¿Podrías ser más específico sobre qué producto estás buscando?"
+        
+        # Mapeo mejorado de sinónimos
+        sinonimos = {
+            "extintor": ["extintor", "extintores", "pqs", "co2", "fuego", "incendio"],
+            "extintores": ["extintor", "extintores", "pqs", "co2", "fuego", "incendio"],
+            "casco": ["casco", "cascos", "seguridad", "protección"],
+            "cascos": ["casco", "cascos", "seguridad", "protección"],
+            "guante": ["guante", "guantes", "nitrilo", "seguridad", "protección"],
+            "guantes": ["guante", "guantes", "nitrilo", "seguridad", "protección"],
+            "bota": ["bota", "botas", "seguridad", "acero", "protección"],
+            "botas": ["bota", "botas", "seguridad", "acero", "protección"],
+            "gafa": ["gafa", "gafas", "lente", "lentes", "seguridad", "protección"],
+            "gafas": ["gafa", "gafas", "lente", "lentes", "seguridad", "protección"],
+            "chaleco": ["chaleco", "chalecos", "reflectivo", "visibilidad"],
+            "señal": ["señal", "señales", "salida", "evacuación", "seguridad"]
+        }
+        
+        # Expandir palabras con sinónimos solo para palabras clave principales
+        palabras_expandidas = set()
+        palabras_principales = []
+        
         for palabra in palabras_busqueda:
-            # Remover signos de puntuación
-            palabra_limpia = re.sub(r'[¿?¡!.,;:()"]', '', palabra)
-            if len(palabra_limpia) > 2 and palabra_limpia not in palabras_irrelevantes:
-                palabras_limpias.append(palabra_limpia)
+            palabras_principales.append(palabra)
+            palabras_expandidas.add(palabra)
+            if palabra in sinonimos:
+                palabras_expandidas.update(sinonimos[palabra])
         
-        palabras_relevantes = palabras_limpias
+        logger.info(f"[retrieval_inventario] Palabras clave detectadas: {palabras_principales}")
+        logger.info(f"[retrieval_inventario] Palabras expandidas con sinónimos: {list(palabras_expandidas)}")
         
-        logging.info(f"[retrieval_inventario] Palabras relevantes extraídas: {palabras_relevantes}")
-        
-        if not palabras_relevantes:
-            return "¿Podrías ser más específico sobre qué producto estás buscando? Por ejemplo: 'extintores', 'cascos de seguridad', etc."
-        
-        # 3. BÚSQUEDA HÍBRIDA: Semántica + Texto
-        productos_encontrados = []
-        
-        # 3.1 Búsqueda semántica con FAISS/Pinecone
+        # Búsqueda inteligente: priorizar coincidencias exactas de palabras clave
         try:
-            retriever = get_retriever(db)
-            await retriever.sync_with_db()
+            from sqlalchemy import or_, and_
             
-            # Crear consulta optimizada para búsqueda semántica
-            consulta_semantica = " ".join(palabras_relevantes)
-            ids_semanticos = await retriever.search(consulta_semantica, top_k=5)
+            # Crear condiciones de búsqueda
+            condiciones_principales = []
+            condiciones_expandidas = []
             
-            if ids_semanticos:
+            # Buscar palabras principales (mayor prioridad)
+            for palabra in palabras_principales:
+                condiciones_principales.extend([
+                    Producto.nombre.ilike(f"%{palabra}%"),
+                    Producto.descripcion.ilike(f"%{palabra}%")
+                ])
+            
+            # Buscar palabras expandidas (menor prioridad)
+            for palabra in palabras_expandidas:
+                condiciones_expandidas.extend([
+                    Producto.nombre.ilike(f"%{palabra}%"),
+                    Producto.descripcion.ilike(f"%{palabra}%")
+                ])
+            
+            # Primera búsqueda: coincidencias principales
+            productos_encontrados = []
+            if condiciones_principales:
                 result = await db.execute(
                     select(Producto).where(
-                        Producto.id.in_(ids_semanticos),
+                        or_(*condiciones_principales),
                         Producto.activo == True,
                         Producto.stock > 0
-                    )
+                    ).limit(8)
                 )
-                productos_semanticos = result.scalars().all()
-                
-                # Validar relevancia de resultados semánticos
-                for producto in productos_semanticos:
-                    nombre_producto = producto.nombre.lower()
-                    descripcion_producto = (producto.descripcion or "").lower()
-                    
-                    # Un producto es relevante si contiene alguna palabra clave
-                    es_relevante = any(
-                        palabra in nombre_producto or palabra in descripcion_producto
-                        for palabra in palabras_relevantes
-                    )
-                    
-                    if es_relevante:
-                        productos_encontrados.append(producto)
-                        
-                logging.info(f"[retrieval_inventario] Búsqueda semántica: {len(productos_semanticos)} encontrados, {len(productos_encontrados)} relevantes")
-        
-        except Exception as e:
-            logging.warning(f"[retrieval_inventario] Búsqueda semántica falló: {e}")
-        
-        # 3.2 Búsqueda por texto como respaldo/complemento
-        if len(productos_encontrados) < 3:
-            condiciones_texto = []
+                productos_encontrados = result.scalars().all()
             
-            for palabra in palabras_relevantes:
-                # Búsqueda exacta
-                condiciones_texto.append(Producto.nombre.ilike(f"%{palabra}%"))
-                condiciones_texto.append(Producto.descripcion.ilike(f"%{palabra}%"))
-                
-                # Manejo de plurales/singulares en español
-                if palabra.endswith('es') and len(palabra) > 4:
-                    # extintores -> extintor
-                    singular = palabra[:-2]
-                    condiciones_texto.append(Producto.nombre.ilike(f"%{singular}%"))
-                    condiciones_texto.append(Producto.descripcion.ilike(f"%{singular}%"))
-                elif palabra.endswith('s') and len(palabra) > 3 and not palabra.endswith('es'):
-                    # cascos -> casco
-                    singular = palabra[:-1]
-                    condiciones_texto.append(Producto.nombre.ilike(f"%{singular}%"))
-                    condiciones_texto.append(Producto.descripcion.ilike(f"%{singular}%"))
-                elif not palabra.endswith('s'):
-                    # extintor -> extintores
-                    plural_s = palabra + 's'
-                    plural_es = palabra + 'es'
-                    condiciones_texto.append(Producto.nombre.ilike(f"%{plural_s}%"))
-                    condiciones_texto.append(Producto.descripcion.ilike(f"%{plural_s}%"))
-                    condiciones_texto.append(Producto.nombre.ilike(f"%{plural_es}%"))
-                    condiciones_texto.append(Producto.descripcion.ilike(f"%{plural_es}%"))
-            
-            if condiciones_texto:
-                from sqlalchemy import or_
+            # Si no hay suficientes resultados, buscar con sinónimos
+            if len(productos_encontrados) < 3 and condiciones_expandidas:
                 result = await db.execute(
                     select(Producto).where(
-                        or_(*condiciones_texto),
+                        or_(*condiciones_expandidas),
                         Producto.activo == True,
                         Producto.stock > 0
                     ).limit(10)
                 )
-                productos_texto = result.scalars().all()
+                productos_expandidos = result.scalars().all()
                 
-                # Agregar productos de texto que no estén ya incluidos
+                # Combinar resultados eliminando duplicados
                 ids_existentes = {p.id for p in productos_encontrados}
-                for p in productos_texto:
-                    if p.id not in ids_existentes:
+                for p in productos_expandidos:
+                    if p.id not in ids_existentes and len(productos_encontrados) < 10:
                         productos_encontrados.append(p)
-                
-                logging.info(f"[retrieval_inventario] Búsqueda por texto: {len(productos_texto)} adicionales encontrados")
-        
-        # 4. CONSTRUIR RESPUESTA
-        if not productos_encontrados:
-            sugerencia = "¿Podrías intentar con palabras como: 'extintores', 'cascos', 'guantes', 'botas', 'chalecos', 'linternas'?"
-            return f"No encontramos productos que coincidan con tu búsqueda. {sugerencia}"
-        
-        # 5. AGRUPAR Y FORMATEAR RESULTADOS
-        productos_agrupados = {}
-        for p in productos_encontrados:
-            # Extraer nombre base eliminando especificaciones
-            nombre_base = p.nombre
-            especificaciones = ["10 libras", "20 libras", "amarillo", "azul", "negro", "blanco", "verde", "rojo"]
-            for esp in especificaciones:
-                nombre_base = nombre_base.replace(esp, "").strip()
             
-            # Limpiar espacios dobles
-            nombre_base = re.sub(r'\s+', ' ', nombre_base).strip()
+            if not productos_encontrados:
+                return f"No encontramos productos relacionados con: {', '.join(palabras_principales)}. ¿Podrías intentar con otras palabras?"
             
-            if nombre_base not in productos_agrupados:
-                productos_agrupados[nombre_base] = []
-            productos_agrupados[nombre_base].append(p)
-        
-        # 6. FORMATEAR RESPUESTA FINAL
-        contexto_partes = []
-        
-        for nombre_base, productos_grupo in productos_agrupados.items():
-            if len(productos_grupo) == 1:
-                # Producto único
-                p = productos_grupo[0]
+            # Formatear respuesta
+            respuesta_partes = []
+            for p in productos_encontrados:
                 disponibilidad = "✅ Disponible" if p.stock > 10 else "⚠️ Stock limitado"
-                contexto_partes.append(f"• **{p.nombre}**: {p.descripcion} - ${p.precio:,.0f} ({disponibilidad})")
-            else:
-                # Múltiples variaciones
-                contexto_partes.append(f"• **{nombre_base}** - Variaciones disponibles:")
-                for p in sorted(productos_grupo, key=lambda x: x.precio):
-                    disponibilidad = "✅ Disponible" if p.stock > 10 else "⚠️ Stock limitado"
-                    especificacion = p.nombre.replace(nombre_base, "").strip()
-                    if especificacion:
-                        contexto_partes.append(f"  - {especificacion}: ${p.precio:,.0f} ({disponibilidad})")
-                    else:
-                        contexto_partes.append(f"  - Estándar: ${p.precio:,.0f} ({disponibilidad})")
-        
-        contexto_str = "\n".join(contexto_partes)
-        logging.info(f"[retrieval_inventario] Respuesta final: {len(productos_encontrados)} productos en {len(productos_agrupados)} grupos")
-        
-        return contexto_str
+                descripcion = p.descripcion if p.descripcion else "Sin descripción"
+                respuesta_partes.append(f"• **{p.nombre}**: {descripcion} - ${p.precio:,.0f} ({disponibilidad})")
+            
+            return "\n".join(respuesta_partes)
+                
+        except Exception as e:
+            logger.error(f"[retrieval_inventario] Error en búsqueda específica: {e}")
+            return "Error al buscar productos. Por favor, intenta de nuevo."
         
     except Exception as e:
-        logging.error(f"[retrieval_inventario] Error crítico: {str(e)}")
+        logger.error(f"[retrieval_inventario] Error crítico: {str(e)}")
         return "Error al buscar productos. Por favor, intenta de nuevo o contacta con soporte."
 
 async def retrieval_contexto_empresa(mensaje: str, db):
@@ -693,7 +420,7 @@ async def extraer_producto_cantidad(mensaje: str, db):
         cantidad_raw = int(numeros[0]) if numeros else 1
         
         # Log para debugging
-        logging.info(f"Números encontrados en '{mensaje}': {numeros}, cantidad_raw: {cantidad_raw}")
+        logger.info(f"Números encontrados en '{mensaje}': {numeros}, cantidad_raw: {cantidad_raw}")
         
         # VALIDACIÓN CRÍTICA: Rechazar cantidades inválidas inmediatamente
         if cantidad_raw <= 0:
@@ -806,19 +533,19 @@ async def extraer_producto_cantidad(mensaje: str, db):
             productos_candidatos.sort(key=lambda x: (x["coincidencias_especificas"], x["coincidencias_basicas"]), reverse=True)
             
             mejor_candidato = productos_candidatos[0]
-            logging.info(f"Producto encontrado: {mejor_candidato['producto']['nombre']} (Score: {mejor_candidato['score_total']}, Específicas: {mejor_candidato['coincidencias_especificas']})")
+            logger.info(f"Producto encontrado: {mejor_candidato['producto']['nombre']} (Score: {mejor_candidato['score_total']}, Específicas: {mejor_candidato['coincidencias_especificas']})")
             
             # Si hay múltiples candidatos con score similar, registrar para posible ambigüedad
             candidatos_similares = [c for c in productos_candidatos if c["score_total"] >= mejor_candidato["score_total"] * 0.8]
             if len(candidatos_similares) > 1:
-                logging.warning(f"Múltiples productos similares encontrados: {[c['producto']['nombre'] for c in candidatos_similares[:3]]}")
+                logger.warning(f"Múltiples productos similares encontrados: {[c['producto']['nombre'] for c in candidatos_similares[:3]]}")
             
             return mejor_candidato["producto"], cantidad
         
         return None, None
         
     except Exception as e:
-        logging.error(f"Error extrayendo producto y cantidad: {e}")
+        logger.error(f"Error extrayendo producto y cantidad: {e}")
         return None, None
 
 async def detectar_campo_cliente(mensaje: str, campos_faltantes: list):
