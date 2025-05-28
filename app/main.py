@@ -24,9 +24,14 @@ from app.api.chat_control import router as chat_control_router
 from app.api.websockets import router as websockets_router
 from app.api.files import router as files_router
 from app.api.testing_semantico import router as testing_router
+from app.api.monitoring import router as monitoring_router
 
 # Importa la función para crear tablas
 from app.core.database import create_tables
+
+# Importa el WebSocket Manager Enterprise y Rate Limiter
+from app.core.websocket_manager import ws_manager
+from app.core.rate_limiting import rate_limiter
 
 # Configurar logging
 logging.basicConfig(
@@ -53,14 +58,14 @@ register_exception_handlers(app)
 # Evento de inicio para crear tablas
 @app.on_event("startup")
 async def startup_event():
-    """Inicialización del servidor"""
+    """Inicialización del servidor con componentes enterprise"""
     global app_start_time
     app_start_time = datetime.now()
-    logger.info("Iniciando servidor...")
+    logger.info("🚀 Iniciando servidor con componentes enterprise...")
     
     try:
         await create_tables()
-        logger.info("Tablas de base de datos creadas/verificadas")
+        logger.info("✅ Tablas de base de datos creadas/verificadas")
         
         # Inicializar estado por defecto del sistema AI (siempre ON)
         from app.core.database import get_db
@@ -69,15 +74,40 @@ async def startup_event():
         db = await db_gen.__anext__()
         try:
             await ChatControlService.ensure_default_global_state(db)
-            logger.info("Estado por defecto del sistema AI inicializado")
+            logger.info("✅ Estado por defecto del sistema AI inicializado")
         finally:
             await db.close()
         
-        logger.info("Servidor iniciado exitosamente")
+        # Inicializar WebSocket Manager Enterprise
+        await ws_manager.start()
+        logger.info("✅ WebSocket Manager Enterprise iniciado")
+        
+        logger.info("🎉 Servidor iniciado exitosamente con componentes enterprise")
         
     except Exception as e:
-        logger.error(f"Error durante la inicialización: {str(e)}", exc_info=True)
+        logger.error(f"❌ Error durante la inicialización: {str(e)}", exc_info=True)
         raise
+
+# Evento de cierre para cleanup
+@app.on_event("shutdown") 
+async def shutdown_event():
+    """Cierre elegante del servidor"""
+    logger.info("🔄 Cerrando servidor...")
+    
+    try:
+        # Cerrar WebSocket Manager
+        await ws_manager.stop()
+        logger.info("✅ WebSocket Manager cerrado")
+        
+        # Cerrar base de datos
+        from app.core.database import close_database
+        await close_database()
+        logger.info("✅ Base de datos cerrada")
+        
+        logger.info("✅ Servidor cerrado correctamente")
+        
+    except Exception as e:
+        logger.error(f"❌ Error durante el cierre: {str(e)}")
 
 # Middleware CORS (habilita acceso desde frontend local u otros dominios)
 app.add_middleware(
@@ -102,25 +132,37 @@ app.include_router(chat_control_router)
 app.include_router(websockets_router)
 app.include_router(files_router)
 app.include_router(testing_router)
+app.include_router(monitoring_router)
 
-# Health check mejorado
+# Health check mejorado con métricas enterprise
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Health check con información detallada del sistema"""
+    """Health check con información detallada del sistema y métricas enterprise"""
     try:
         # Calcular uptime
         uptime_delta = datetime.now() - app_start_time
         uptime_str = f"{uptime_delta.days}d {uptime_delta.seconds//3600}h {(uptime_delta.seconds%3600)//60}m"
         
-        # Verificar estado de la base de datos
+        # Verificar estado de la base de datos con métricas de pool
         database_status = "connected"
+        database_info = {}
         try:
-            from app.core.database import get_db
-            db_gen = get_db()
-            db = await db_gen.__anext__()
-            await db.close()
-        except Exception:
-            database_status = "disconnected"
+            from app.core.database import check_database_health, get_connection_stats
+            
+            # Health check básico
+            db_health = await check_database_health()
+            database_status = db_health.get("status", "unknown")
+            
+            # Estadísticas del pool de conexiones
+            connection_stats = await get_connection_stats()
+            database_info = {
+                "health": db_health,
+                "connection_pool": connection_stats
+            }
+            
+        except Exception as e:
+            database_status = "error"
+            database_info = {"error": str(e)}
         
         # Verificar dependencias principales
         dependencies = {}
@@ -139,23 +181,89 @@ async def health_check():
         except ImportError:
             dependencies["faiss"] = "not_available"
         
+        # Verificar Sentence Transformers
+        try:
+            import sentence_transformers
+            dependencies["sentence_transformers"] = "available"
+        except ImportError:
+            dependencies["sentence_transformers"] = "not_available"
+        
+        # Verificar Torch
+        try:
+            import torch
+            dependencies["torch"] = "available"
+        except ImportError:
+            dependencies["torch"] = "not_available"
+        
+        # Obtener estadísticas de WebSocket Manager
+        websocket_stats = ws_manager.get_connection_stats()
+        
+        # Obtener estadísticas de Rate Limiter
+        rate_limit_stats = rate_limiter.get_stats()
+        
+        # Obtener estadísticas de embeddings
+        try:
+            from app.services.embeddings_service import get_embeddings_stats
+            embeddings_stats = get_embeddings_stats()
+        except Exception:
+            embeddings_stats = {"status": "not_initialized"}
+        
+        # Determinar estado general del sistema
+        overall_status = StatusEnum.SUCCESS
+        status_message = "Sistema funcionando óptimamente"
+        
+        # Verificar alertas
+        alerts = []
+        
+        if database_status != "healthy":
+            overall_status = StatusEnum.ERROR
+            status_message = "Problemas con la base de datos"
+            alerts.append("Base de datos no disponible")
+        
+        if websocket_stats["current_connections"] > websocket_stats["limits"]["max_global"] * 0.8:
+            overall_status = StatusEnum.WARNING
+            status_message = "Alta carga de conexiones WebSocket"
+            alerts.append("Conexiones WebSocket cerca del límite")
+        
+        if rate_limit_stats["block_rate"] > 10:  # Más del 10% de requests bloqueadas
+            alerts.append("Alto rate de requests bloqueadas")
+        
+        if len(alerts) > 0 and overall_status == StatusEnum.SUCCESS:
+            overall_status = StatusEnum.WARNING
+            status_message = "Sistema con advertencias"
+        
         return HealthResponse(
-            service_name="Agente Vendedor API",
-            version="1.0.0",
+            service_name="Agente Vendedor API Enterprise",
+            version="2.0.0",
             uptime=uptime_str,
             database_status=database_status,
             dependencies=dependencies,
-            status=StatusEnum.SUCCESS if database_status == "connected" else StatusEnum.WARNING,
-            message="Servicio funcionando correctamente" if database_status == "connected" else "Servicio con advertencias"
+            status=overall_status,
+            message=status_message,
+            # Nuevas métricas enterprise
+            enterprise_metrics={
+                "database": database_info,
+                "websockets": websocket_stats,
+                "rate_limiting": rate_limit_stats,
+                "embeddings": embeddings_stats,
+                "alerts": alerts,
+                "performance": {
+                    "uptime_seconds": uptime_delta.total_seconds(),
+                    "peak_connections": websocket_stats.get("peak_connections", 0),
+                    "total_requests_checked": rate_limit_stats.get("requests_checked", 0),
+                    "requests_blocked": rate_limit_stats.get("requests_blocked", 0)
+                }
+            }
         )
         
     except Exception as e:
-        logger.error(f"Error en health check: {str(e)}")
+        logger.error(f"❌ Error en health check: {str(e)}")
         return HealthResponse(
             status=StatusEnum.ERROR,
             message=f"Error en health check: {str(e)}",
             database_status="unknown",
-            dependencies={}
+            dependencies={},
+            enterprise_metrics={"error": str(e)}
         )
 
 # Raíz simplificada
