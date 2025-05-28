@@ -23,6 +23,7 @@ from app.api.exportar import router as exportar_router
 from app.api.chat_control import router as chat_control_router
 from app.api.websockets import router as websockets_router
 from app.api.files import router as files_router
+from app.api.testing_semantico import router as testing_router
 
 # Importa la función para crear tablas
 from app.core.database import create_tables
@@ -100,6 +101,7 @@ app.include_router(exportar_router)
 app.include_router(chat_control_router)
 app.include_router(websockets_router)
 app.include_router(files_router)
+app.include_router(testing_router)
 
 # Health check mejorado
 @app.get("/health", response_model=HealthResponse)
