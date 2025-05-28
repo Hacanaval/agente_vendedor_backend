@@ -32,6 +32,7 @@ from app.core.database import create_tables
 # Importa el WebSocket Manager Enterprise y Rate Limiter
 from app.core.websocket_manager import ws_manager
 from app.core.rate_limiting import rate_limiter
+from app.core.cache_manager import cache_manager
 
 # Configurar logging
 logging.basicConfig(
@@ -82,6 +83,10 @@ async def startup_event():
         await ws_manager.start()
         logger.info("✅ WebSocket Manager Enterprise iniciado")
         
+        # Inicializar Cache Manager Enterprise
+        await cache_manager.start()
+        logger.info("✅ Cache Manager Enterprise iniciado")
+        
         logger.info("🎉 Servidor iniciado exitosamente con componentes enterprise")
         
     except Exception as e:
@@ -98,6 +103,10 @@ async def shutdown_event():
         # Cerrar WebSocket Manager
         await ws_manager.stop()
         logger.info("✅ WebSocket Manager cerrado")
+        
+        # Cerrar Cache Manager
+        await cache_manager.stop()
+        logger.info("✅ Cache Manager cerrado")
         
         # Cerrar base de datos
         from app.core.database import close_database
@@ -208,6 +217,9 @@ async def health_check():
         except Exception:
             embeddings_stats = {"status": "not_initialized"}
         
+        # Obtener estadísticas del Cache Manager
+        cache_stats = cache_manager.get_stats()
+        
         # Determinar estado general del sistema
         overall_status = StatusEnum.SUCCESS
         status_message = "Sistema funcionando óptimamente"
@@ -246,6 +258,7 @@ async def health_check():
                 "websockets": websocket_stats,
                 "rate_limiting": rate_limit_stats,
                 "embeddings": embeddings_stats,
+                "cache": cache_stats,
                 "alerts": alerts,
                 "performance": {
                     "uptime_seconds": uptime_delta.total_seconds(),

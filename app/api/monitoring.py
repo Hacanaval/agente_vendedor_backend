@@ -14,6 +14,7 @@ import platform
 from app.core.database import get_db, check_database_health, get_connection_stats
 from app.core.websocket_manager import ws_manager
 from app.core.rate_limiting import rate_limiter, export_rate_limits_config
+from app.core.cache_manager import cache_manager
 from app.services.embeddings_service import get_embeddings_stats
 from app.models.responses import StatusEnum
 
@@ -260,6 +261,205 @@ async def get_embeddings_metrics():
         
     except Exception as e:
         logger.error(f"Error obteniendo métricas de embeddings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ===============================
+# MÉTRICAS DE CACHE ENTERPRISE
+# ===============================
+
+@router.get("/cache")
+async def get_cache_metrics():
+    """Métricas detalladas del sistema de cache enterprise"""
+    try:
+        stats = cache_manager.get_stats()
+        
+        # Análisis de performance
+        global_hit_rate = stats["global"]["hit_rate"]
+        memory_hit_rate = stats["levels"]["memory"]["hit_rate"]
+        disk_hit_rate = stats["levels"]["disk"]["hit_rate"]
+        
+        performance_status = "excellent" if global_hit_rate > 80 else \
+                           "good" if global_hit_rate > 60 else \
+                           "poor" if global_hit_rate > 30 else "critical"
+        
+        recommendations = []
+        if global_hit_rate < 50:
+            recommendations.append("Considerar aumentar TTL para contenido estable")
+        if memory_hit_rate < 70:
+            recommendations.append("Aumentar tamaño del cache en memoria")
+        if stats["levels"]["memory"]["evictions"] > 100:
+            recommendations.append("Cache en memoria saturado - considerar optimización")
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "stats": stats,
+            "performance": {
+                "status": performance_status,
+                "global_hit_rate": global_hit_rate,
+                "memory_hit_rate": memory_hit_rate,
+                "disk_hit_rate": disk_hit_rate
+            },
+            "recommendations": [r for r in recommendations if r]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo métricas de cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/cache/levels")
+async def get_cache_levels_detail():
+    """Detalle de cada nivel de cache"""
+    try:
+        stats = cache_manager.get_stats()
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "levels": {
+                "L1_memory": {
+                    **stats["levels"]["memory"],
+                    "description": "Cache en memoria - Ultra rápido (1-5ms)",
+                    "priority": "highest"
+                },
+                "L2_disk": {
+                    **stats["levels"]["disk"],
+                    "description": "Cache en disco - Rápido (10-50ms)",
+                    "priority": "high"
+                }
+            },
+            "cache_flow": {
+                "description": "L1 (memoria) -> L2 (disco) -> Source (BD/API)",
+                "promotion": "Los datos se promueven de L2 a L1 en acceso",
+                "eviction": "LRU en memoria, TTL en ambos niveles"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo detalle de niveles de cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/cache/clear")
+async def clear_cache(
+    namespace: Optional[str] = Query(None, description="Namespace específico a limpiar")
+):
+    """Limpia el cache (todo o por namespace)"""
+    try:
+        if namespace:
+            cleared = await cache_manager.clear_namespace(namespace)
+            message = f"Cache del namespace '{namespace}' limpiado"
+        else:
+            memory_cleared = await cache_manager.memory_cache.clear()
+            disk_cleared = await cache_manager.disk_cache.clear()
+            cleared = memory_cleared + disk_cleared
+            message = "Todo el cache limpiado"
+        
+        return {
+            "status": "success",
+            "message": message,
+            "entries_cleared": cleared,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error limpiando cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/cache/invalidate")
+async def invalidate_cache_pattern(
+    pattern: str = Query(..., description="Patrón para invalidar entradas")
+):
+    """Invalida entradas de cache que coincidan con un patrón"""
+    try:
+        invalidated = await cache_manager.invalidate_pattern(pattern)
+        
+        return {
+            "status": "success",
+            "message": f"Entradas invalidadas con patrón: {pattern}",
+            "entries_invalidated": invalidated,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error invalidando cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/cache/efficiency")
+async def get_cache_efficiency():
+    """Análisis de eficiencia del cache"""
+    try:
+        stats = cache_manager.get_stats()
+        
+        # Calcular métricas de eficiencia
+        global_stats = stats["global"]
+        memory_stats = stats["levels"]["memory"]
+        disk_stats = stats["levels"]["disk"]
+        
+        total_requests = global_stats["total_requests"]
+        if total_requests == 0:
+            return {
+                "status": "no_data",
+                "message": "No hay suficientes datos para análisis"
+            }
+        
+        # Eficiencia por nivel
+        memory_efficiency = (memory_stats["hits"] / max(total_requests, 1)) * 100
+        disk_efficiency = (disk_stats["hits"] / max(total_requests, 1)) * 100
+        
+        # Análisis de costos (estimado)
+        memory_cost_saved = memory_stats["hits"] * 0.001  # 1ms ahorrado por hit
+        disk_cost_saved = disk_stats["hits"] * 0.05      # 50ms ahorrado por hit
+        
+        # Recomendaciones de optimización
+        optimizations = []
+        
+        if memory_efficiency < 30:
+            optimizations.append({
+                "type": "memory_size",
+                "priority": "high",
+                "description": "Aumentar tamaño del cache en memoria",
+                "impact": "Reducir latencia promedio"
+            })
+        
+        if disk_efficiency < 20:
+            optimizations.append({
+                "type": "ttl_tuning",
+                "priority": "medium", 
+                "description": "Ajustar TTL para mejor retención",
+                "impact": "Mejorar hit rate en disco"
+            })
+        
+        if memory_stats["evictions"] > memory_stats["hits"] * 0.1:
+            optimizations.append({
+                "type": "eviction_rate",
+                "priority": "high",
+                "description": "Cache en memoria saturado",
+                "impact": "Datos útiles siendo eliminados prematuramente"
+            })
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "efficiency": {
+                "global_hit_rate": global_stats["hit_rate"],
+                "memory_efficiency": memory_efficiency,
+                "disk_efficiency": disk_efficiency,
+                "total_requests": total_requests,
+                "cost_savings": {
+                    "memory_ms_saved": memory_cost_saved,
+                    "disk_ms_saved": disk_cost_saved,
+                    "total_ms_saved": memory_cost_saved + disk_cost_saved
+                }
+            },
+            "optimizations": optimizations,
+            "health": {
+                "status": "excellent" if global_stats["hit_rate"] > 80 else
+                         "good" if global_stats["hit_rate"] > 60 else
+                         "needs_attention",
+                "memory_pressure": "high" if memory_stats["evictions"] > 50 else "normal",
+                "disk_usage": f"{disk_stats['total_size_mb']:.1f}MB / {disk_stats['max_size_mb']}MB"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analizando eficiencia de cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ===============================
