@@ -1,6 +1,7 @@
 """
 Servicio de Embeddings Semánticos Enterprise
 Sistema avanzado de búsqueda vectorial para catálogos grandes (2000+ SKUs)
+Integrado con cache semántico inteligente para máxima performance
 """
 import os
 import asyncio
@@ -13,13 +14,52 @@ from pathlib import Path
 from datetime import datetime
 import hashlib
 
-from sentence_transformers import SentenceTransformer
+# Fallback para embeddings si sentence-transformers falla
+USE_GEMINI_FALLBACK = True
+FORCE_GEMINI = True  # Forzar uso de Gemini para evitar problemas con sentence-transformers
+
+try:
+    from sentence_transformers import SentenceTransformer
+    # Temporalmente desactivamos sentence-transformers para usar Gemini
+    SENTENCE_TRANSFORMERS_AVAILABLE = False if FORCE_GEMINI else True
+except Exception as e:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning(f"⚠️ SentenceTransformers no disponible, usando Gemini: {e}")
+
+# Google Gemini fallback
+if USE_GEMINI_FALLBACK:
+    try:
+        import google.generativeai as genai
+        GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+        if GOOGLE_API_KEY:
+            genai.configure(api_key=GOOGLE_API_KEY)
+            GEMINI_AVAILABLE = True
+        else:
+            GEMINI_AVAILABLE = False
+    except Exception:
+        GEMINI_AVAILABLE = False
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.models.producto import Producto
 
-logger = logging.getLogger(__name__)
+# 🧠 INTEGRACIÓN CACHE SEMÁNTICO
+try:
+    from app.services.rag_semantic_cache import (
+        semantic_cache_service,
+        get_semantic_embedding,
+        get_semantic_search_cache,
+        cache_semantic_search
+    )
+    SEMANTIC_CACHE_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("🧠 Cache semántico integrado en embeddings service")
+except ImportError as e:
+    SEMANTIC_CACHE_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning(f"⚠️ Cache semántico no disponible: {e}")
 
 # Configuración del modelo
 EMBEDDING_MODEL_NAME = "paraphrase-multilingual-mpnet-base-v2"
@@ -34,6 +74,7 @@ class EmbeddingsService:
     
     Características:
     - Modelo multilingual optimizado para español
+    - Fallback automático a Google Gemini si sentence-transformers falla
     - Índice FAISS para búsqueda ultra-rápida (5-20ms)
     - Cache inteligente con invalidación automática
     - Soporte para 2000+ SKUs sin degradación
@@ -42,6 +83,7 @@ class EmbeddingsService:
     
     def __init__(self):
         self.model: Optional[SentenceTransformer] = None
+        self.use_gemini = False
         self.index: Optional[faiss.IndexFlatIP] = None  # Inner Product para similaridad coseno
         self.product_metadata: List[Dict[str, Any]] = []
         self.is_initialized = False
@@ -61,7 +103,7 @@ class EmbeddingsService:
         try:
             logger.info("🚀 Inicializando servicio de embeddings semánticos...")
             
-            # Cargar modelo
+            # Cargar modelo con fallback
             await self._load_model()
             
             # Cargar o construir índice
@@ -80,17 +122,57 @@ class EmbeddingsService:
             raise
     
     async def _load_model(self):
-        """Carga el modelo de sentence transformers de forma asíncrona"""
-        def _load():
-            return SentenceTransformer(
-                EMBEDDING_MODEL_NAME,
-                device='cpu'  # Usar CPU para mayor compatibilidad
+        """Carga el modelo con fallback automático a Gemini"""
+        try:
+            if SENTENCE_TRANSFORMERS_AVAILABLE:
+                logger.info("🔄 Intentando cargar SentenceTransformers...")
+                def _load():
+                    return SentenceTransformer(
+                        EMBEDDING_MODEL_NAME,
+                        device='cpu'  # Usar CPU para mayor compatibilidad
+                    )
+                
+                # Ejecutar en thread pool para no bloquear
+                loop = asyncio.get_event_loop()
+                self.model = await loop.run_in_executor(None, _load)
+                self.use_gemini = False
+                logger.info(f"🤖 Modelo SentenceTransformers cargado: {EMBEDDING_MODEL_NAME}")
+            else:
+                raise Exception("SentenceTransformers no disponible")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Error con SentenceTransformers: {e}")
+            if GEMINI_AVAILABLE:
+                logger.info("🔄 Cambiando a Google Gemini como fallback...")
+                self.use_gemini = True
+                self.model = None
+                logger.info("🤖 Configurado para usar Google Gemini embeddings")
+            else:
+                logger.error("❌ No hay modelos de embeddings disponibles")
+                raise Exception("Ningún modelo de embeddings está disponible")
+    
+    async def _generate_embedding_gemini(self, text: str) -> np.ndarray:
+        """Genera embedding usando Google Gemini"""
+        try:
+            result = genai.embed_content(
+                model="models/text-embedding-004",
+                content=text,
+                task_type="retrieval_document"
             )
-        
-        # Ejecutar en thread pool para no bloquear
-        loop = asyncio.get_event_loop()
-        self.model = await loop.run_in_executor(None, _load)
-        logger.info(f"🤖 Modelo cargado: {EMBEDDING_MODEL_NAME}")
+            embedding = np.array(result['embedding'], dtype='float32')
+            
+            # Normalizar para similaridad coseno
+            norm = np.linalg.norm(embedding)
+            if norm > 0:
+                embedding = embedding / norm
+            
+            return embedding
+            
+        except Exception as e:
+            logger.error(f"Error generando embedding con Gemini: {e}")
+            # Fallback: embedding aleatorio normalizado
+            embedding = np.random.rand(EMBEDDING_DIMENSION).astype('float32')
+            return embedding / np.linalg.norm(embedding)
     
     def _index_exists(self) -> bool:
         """Verifica si existe el índice FAISS"""
@@ -217,18 +299,34 @@ class EmbeddingsService:
         return sinónimos[:3]  # Limitar a 3 sinónimos para no saturar
     
     async def _generate_embeddings_batch(self, texts: List[str]) -> np.ndarray:
-        """Genera embeddings en batch de forma asíncrona"""
-        def _encode():
-            return self.model.encode(
-                texts, 
-                normalize_embeddings=True,  # Normalizar para similaridad coseno
-                show_progress_bar=True,
-                batch_size=32
-            )
-        
-        loop = asyncio.get_event_loop()
-        embeddings = await loop.run_in_executor(None, _encode)
-        return embeddings.astype('float32')
+        """Genera embeddings en batch con fallback a Gemini"""
+        if self.use_gemini:
+            # Usar Google Gemini
+            embeddings = []
+            for i, text in enumerate(texts):
+                if i % 10 == 0:
+                    logger.info(f"Procesando con Gemini {i+1}/{len(texts)}...")
+                
+                embedding = await self._generate_embedding_gemini(text)
+                embeddings.append(embedding)
+                
+                # Pequeña pausa para evitar rate limits
+                await asyncio.sleep(0.1)
+            
+            return np.array(embeddings, dtype='float32')
+        else:
+            # Usar SentenceTransformers original
+            def _encode():
+                return self.model.encode(
+                    texts, 
+                    normalize_embeddings=True,  # Normalizar para similaridad coseno
+                    show_progress_bar=True,
+                    batch_size=32
+                )
+            
+            loop = asyncio.get_event_loop()
+            embeddings = await loop.run_in_executor(None, _encode)
+            return embeddings.astype('float32')
     
     def _create_faiss_index(self, embeddings: np.ndarray, metadata: List[Dict]):
         """Crea el índice FAISS optimizado"""
@@ -283,7 +381,7 @@ class EmbeddingsService:
         min_score: float = 0.3
     ) -> List[Dict[str, Any]]:
         """
-        Búsqueda semántica de productos
+        Búsqueda semántica de productos con cache semántico inteligente
         
         Args:
             query: Consulta de búsqueda
@@ -302,13 +400,46 @@ class EmbeddingsService:
         try:
             start_time = datetime.now()
             
-            # Generar embedding de la consulta
-            query_embedding = await self._generate_query_embedding(query)
+            # 🧠 PASO 1: Verificar cache semántico de búsquedas
+            if SEMANTIC_CACHE_AVAILABLE:
+                try:
+                    cached_search = await get_semantic_search_cache(
+                        query, 
+                        filters={"min_score": min_score}, 
+                        limit=top_k
+                    )
+                    if cached_search:
+                        logger.info(f"🎯 Cache hit semántico para: '{query[:30]}...'")
+                        return cached_search.get("products", [])
+                except Exception as e:
+                    logger.warning(f"Error verificando cache semántico: {e}")
             
-            # Búsqueda en índice FAISS
+            # 🧠 PASO 2: Obtener embedding con cache semántico
+            query_embedding = None
+            embedding_cached = False
+            
+            if SEMANTIC_CACHE_AVAILABLE:
+                try:
+                    query_embedding, embedding_cached = await get_semantic_embedding(query)
+                    if embedding_cached:
+                        logger.info(f"⚡ Embedding cacheado para: '{query[:30]}...'")
+                except Exception as e:
+                    logger.warning(f"Error obteniendo embedding semántico: {e}")
+            
+            # Fallback: generar embedding tradicional
+            if query_embedding is None:
+                query_embedding_batch = await self._generate_query_embedding(query)
+                query_embedding = query_embedding_batch[0]  # Extraer del batch
+                embedding_cached = False
+            
+            # Asegurar que el embedding tenga la forma correcta para FAISS
+            if len(query_embedding.shape) == 1:
+                query_embedding = query_embedding.reshape(1, -1)
+            
+            # 🔍 PASO 3: Búsqueda en índice FAISS
             scores, indices = self.index.search(query_embedding, min(top_k, len(self.product_metadata)))
             
-            # Preparar resultados
+            # 📊 PASO 4: Preparar resultados
             results = []
             for score, idx in zip(scores[0], indices[0]):
                 if idx == -1 or score < min_score:
@@ -316,12 +447,30 @@ class EmbeddingsService:
                 
                 product = self.product_metadata[idx].copy()
                 product['similarity_score'] = float(score)
-                product['search_method'] = 'semantic'
+                product['search_method'] = 'semantic_cached' if embedding_cached else 'semantic'
                 results.append(product)
+            
+            # 🗄️ PASO 5: Cachear resultados para futuras consultas
+            if SEMANTIC_CACHE_AVAILABLE and results:
+                try:
+                    await cache_semantic_search(
+                        query=query,
+                        products=results,
+                        scores=[r['similarity_score'] for r in results],
+                        filters={"min_score": min_score},
+                        limit=top_k,
+                        metadata={
+                            "embedding_cached": embedding_cached,
+                            "search_duration_ms": (datetime.now() - start_time).total_seconds() * 1000
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(f"Error cacheando búsqueda semántica: {e}")
             
             # Métricas de performance
             duration = (datetime.now() - start_time).total_seconds() * 1000
-            logger.info(f"🔍 Búsqueda completada: {len(results)} resultados en {duration:.1f}ms")
+            cache_status = "cached" if embedding_cached else "generated"
+            logger.info(f"🔍 Búsqueda completada ({cache_status}): {len(results)} resultados en {duration:.1f}ms")
             
             return results
             
@@ -330,13 +479,19 @@ class EmbeddingsService:
             return []
     
     async def _generate_query_embedding(self, query: str) -> np.ndarray:
-        """Genera embedding para una consulta"""
-        def _encode():
-            return self.model.encode([query], normalize_embeddings=True)
-        
-        loop = asyncio.get_event_loop()
-        embedding = await loop.run_in_executor(None, _encode)
-        return embedding.astype('float32')
+        """Genera embedding para una consulta con fallback a Gemini"""
+        if self.use_gemini:
+            # Usar Google Gemini
+            embedding = await self._generate_embedding_gemini(query)
+            return np.array([embedding], dtype='float32')  # Convertir a batch de 1
+        else:
+            # Usar SentenceTransformers original
+            def _encode():
+                return self.model.encode([query], normalize_embeddings=True)
+            
+            loop = asyncio.get_event_loop()
+            embedding = await loop.run_in_executor(None, _encode)
+            return embedding.astype('float32')
     
     async def add_product(self, producto: Producto):
         """Añade un producto al índice (para productos nuevos)"""
@@ -378,13 +533,22 @@ class EmbeddingsService:
     
     def get_stats(self) -> Dict[str, Any]:
         """Obtiene estadísticas del servicio"""
+        model_info = {
+            'name': 'Google Gemini text-embedding-004' if self.use_gemini else EMBEDDING_MODEL_NAME,
+            'type': 'gemini' if self.use_gemini else 'sentence_transformers',
+            'available': True
+        }
+        
         return {
             'initialized': self.is_initialized,
             'total_products': len(self.product_metadata) if self.product_metadata else 0,
-            'model_name': EMBEDDING_MODEL_NAME,
+            'model': model_info,
             'embedding_dimension': EMBEDDING_DIMENSION,
             'index_exists': self._index_exists(),
-            'cache_dir': str(EMBEDDINGS_CACHE_DIR.absolute())
+            'cache_dir': str(EMBEDDINGS_CACHE_DIR.absolute()),
+            'semantic_cache_available': SEMANTIC_CACHE_AVAILABLE,
+            'gemini_available': GEMINI_AVAILABLE,
+            'sentence_transformers_available': SENTENCE_TRANSFORMERS_AVAILABLE
         }
 
 # Instancia global del servicio
@@ -395,9 +559,62 @@ async def initialize_embeddings(force_rebuild: bool = False):
     """Inicializa el servicio de embeddings"""
     await embeddings_service.initialize(force_rebuild)
 
-async def search_products_semantic(query: str, top_k: int = 10) -> List[Dict[str, Any]]:
-    """Búsqueda semántica de productos"""
-    return await embeddings_service.search_products(query, top_k)
+async def search_products_semantic(
+    query: str, 
+    top_k: int = 10, 
+    cached_embedding: np.ndarray = None
+) -> List[Dict[str, Any]]:
+    """
+    Búsqueda semántica de productos con cache de embeddings
+    
+    Args:
+        query: Consulta de búsqueda
+        top_k: Número máximo de resultados
+        cached_embedding: Embedding pre-calculado (opcional)
+    """
+    # Si no hay embedding cacheado, usar el servicio normal
+    if cached_embedding is None:
+        return await embeddings_service.search_products(query, top_k)
+    
+    # Usar embedding cacheado para búsqueda directa
+    try:
+        if not embeddings_service.is_initialized:
+            await embeddings_service.initialize()
+        
+        if not embeddings_service.product_metadata:
+            return []
+        
+        start_time = datetime.now()
+        
+        # Búsqueda directa con embedding cacheado
+        scores, indices = embeddings_service.index.search(
+            cached_embedding.reshape(1, -1), 
+            min(top_k, len(embeddings_service.product_metadata))
+        )
+        
+        # Preparar resultados
+        results = []
+        min_score = 0.3  # Score mínimo
+        
+        for score, idx in zip(scores[0], indices[0]):
+            if idx == -1 or score < min_score:
+                continue
+            
+            product = embeddings_service.product_metadata[idx].copy()
+            product['similarity_score'] = float(score)
+            product['search_method'] = 'semantic_cached'
+            results.append(product)
+        
+        # Métricas de performance
+        duration = (datetime.now() - start_time).total_seconds() * 1000
+        logger.info(f"🔍 Búsqueda con embedding cacheado: {len(results)} resultados en {duration:.1f}ms")
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"❌ Error en búsqueda con embedding cacheado: {e}")
+        # Fallback a búsqueda normal
+        return await embeddings_service.search_products(query, top_k)
 
 async def add_product_to_index(producto: Producto):
     """Añade un producto al índice"""

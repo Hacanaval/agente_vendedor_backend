@@ -463,6 +463,273 @@ async def get_cache_efficiency():
         raise HTTPException(status_code=500, detail=str(e))
 
 # ===============================
+# MÉTRICAS DE CACHE RAG ENTERPRISE
+# ===============================
+
+@router.get("/rag-cache")
+async def get_rag_cache_metrics():
+    """Métricas específicas del cache RAG semántico"""
+    try:
+        from app.services.rag_cache_service import rag_cache_service
+        
+        stats = rag_cache_service.get_cache_stats()
+        
+        # Análisis de performance RAG
+        overall_hit_rate = stats["overall"]["hit_rate"]
+        embedding_hit_rate = stats["by_component"]["embeddings"]["hit_rate"]
+        search_hit_rate = stats["by_component"]["search_results"]["hit_rate"]
+        llm_hit_rate = stats["by_component"]["llm_responses"]["hit_rate"]
+        
+        performance_status = "excellent" if overall_hit_rate > 80 else \
+                           "good" if overall_hit_rate > 60 else \
+                           "poor" if overall_hit_rate > 30 else "critical"
+        
+        # Recomendaciones específicas para RAG
+        recommendations = []
+        if embedding_hit_rate < 70:
+            recommendations.append("Aumentar TTL de embeddings para consultas similares")
+        if search_hit_rate < 60:
+            recommendations.append("Mejorar normalización de consultas para mejor cache hit")
+        if llm_hit_rate < 50:
+            recommendations.append("Implementar templates de respuestas para consultas frecuentes")
+        if stats["overall"]["similarity_matches"] < stats["overall"]["total_hits"] * 0.1:
+            recommendations.append("Mejorar detección de consultas similares")
+        
+        # Estimación de ahorro de costos
+        total_hits = stats["overall"]["total_hits"]
+        embedding_savings = stats["by_component"]["embeddings"]["hits"] * 0.1  # 100ms ahorrados
+        search_savings = stats["by_component"]["search_results"]["hits"] * 0.5   # 500ms ahorrados
+        llm_savings = stats["by_component"]["llm_responses"]["hits"] * 2.0       # 2s ahorrados
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "stats": stats,
+            "performance": {
+                "status": performance_status,
+                "overall_hit_rate": overall_hit_rate,
+                "component_hit_rates": {
+                    "embeddings": embedding_hit_rate,
+                    "search_results": search_hit_rate,
+                    "llm_responses": llm_hit_rate
+                }
+            },
+            "cost_savings": {
+                "total_time_saved_seconds": embedding_savings + search_savings + llm_savings,
+                "embedding_time_saved": embedding_savings,
+                "search_time_saved": search_savings,
+                "llm_time_saved": llm_savings,
+                "estimated_cost_reduction_percent": min(80, overall_hit_rate * 0.8)
+            },
+            "recommendations": [r for r in recommendations if r]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo métricas de cache RAG: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/rag-cache/components")
+async def get_rag_cache_components():
+    """Detalle de cada componente del cache RAG"""
+    try:
+        from app.services.rag_cache_service import rag_cache_service
+        
+        stats = rag_cache_service.get_cache_stats()
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "components": {
+                "embeddings": {
+                    **stats["by_component"]["embeddings"],
+                    "description": "Cache de embeddings de consultas",
+                    "ttl_hours": stats["configuration"]["ttl_config"]["query_embeddings"] / 3600,
+                    "impact": "Evita recálculo de embeddings (100ms+ ahorrados)",
+                    "priority": "critical"
+                },
+                "search_results": {
+                    **stats["by_component"]["search_results"],
+                    "description": "Cache de resultados de búsqueda FAISS",
+                    "ttl_hours": stats["configuration"]["ttl_config"]["search_results"] / 3600,
+                    "impact": "Evita búsqueda FAISS completa (500ms+ ahorrados)",
+                    "priority": "high"
+                },
+                "llm_responses": {
+                    **stats["by_component"]["llm_responses"],
+                    "description": "Cache de respuestas LLM generadas",
+                    "ttl_hours": stats["configuration"]["ttl_config"]["llm_responses"] / 3600,
+                    "impact": "Evita llamadas LLM costosas (2s+ ahorrados)",
+                    "priority": "high"
+                }
+            },
+            "cache_flow": {
+                "description": "Flujo de cache RAG optimizado",
+                "steps": [
+                    "1. Verificar cache de búsqueda completa",
+                    "2. Si miss → verificar cache de embedding",
+                    "3. Si miss → generar embedding y cachear",
+                    "4. Ejecutar búsqueda FAISS",
+                    "5. Verificar cache de respuesta LLM",
+                    "6. Si miss → generar respuesta y cachear",
+                    "7. Cachear resultado completo"
+                ]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo componentes de cache RAG: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/rag-cache/clear")
+async def clear_rag_cache(
+    component: Optional[str] = Query(None, description="Componente específico a limpiar")
+):
+    """Limpia el cache RAG (todo o por componente)"""
+    try:
+        from app.services.rag_cache_service import rag_cache_service
+        
+        if component:
+            if component not in ["embeddings", "search_results", "llm_responses"]:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Componente debe ser: embeddings, search_results, o llm_responses"
+                )
+            
+            # Limpiar componente específico
+            namespace_map = {
+                "embeddings": "query_embeddings",
+                "search_results": "search_results", 
+                "llm_responses": "llm_responses"
+            }
+            
+            cleared = await cache_manager.clear_namespace(namespace_map[component])
+            message = f"Cache del componente '{component}' limpiado"
+        else:
+            # Limpiar todo el cache RAG
+            cleared = await rag_cache_service.invalidate_all_rag_caches()
+            message = "Todo el cache RAG limpiado"
+        
+        return {
+            "status": "success",
+            "message": message,
+            "entries_cleared": cleared,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error limpiando cache RAG: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/rag-cache/invalidate-product")
+async def invalidate_product_rag_cache(
+    product_id: str = Query(..., description="ID del producto a invalidar")
+):
+    """Invalida caches RAG relacionados con un producto específico"""
+    try:
+        from app.services.rag_cache_service import rag_cache_service
+        
+        invalidated = await rag_cache_service.invalidate_product_caches(product_id)
+        
+        return {
+            "status": "success",
+            "message": f"Caches invalidados para producto {product_id}",
+            "entries_invalidated": invalidated,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error invalidando cache de producto: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/rag-cache/performance")
+async def get_rag_cache_performance():
+    """Análisis de performance del cache RAG"""
+    try:
+        from app.services.rag_cache_service import rag_cache_service
+        
+        stats = rag_cache_service.get_cache_stats()
+        
+        # Calcular métricas de performance
+        total_requests = stats["overall"]["total_requests"]
+        if total_requests == 0:
+            return {
+                "status": "no_data",
+                "message": "No hay suficientes datos para análisis de performance RAG"
+            }
+        
+        # Análisis de latencia estimada
+        hit_rate = stats["overall"]["hit_rate"]
+        
+        # Estimaciones de latencia (ms)
+        cache_hit_latency = 50      # 50ms para hit de cache
+        cache_miss_latency = 1500   # 1.5s para miss completo (embedding + FAISS + LLM)
+        
+        avg_latency = (hit_rate/100 * cache_hit_latency) + ((100-hit_rate)/100 * cache_miss_latency)
+        latency_improvement = ((cache_miss_latency - avg_latency) / cache_miss_latency) * 100
+        
+        # Análisis de throughput
+        max_throughput_no_cache = 1    # 1 request/segundo sin cache
+        max_throughput_with_cache = max_throughput_no_cache * (1500 / avg_latency)
+        
+        # Recomendaciones de optimización
+        optimizations = []
+        
+        if hit_rate < 50:
+            optimizations.append({
+                "type": "hit_rate_improvement",
+                "priority": "critical",
+                "description": "Mejorar normalización de consultas",
+                "impact": "Aumentar hit rate del cache"
+            })
+        
+        if stats["by_component"]["embeddings"]["hit_rate"] < 70:
+            optimizations.append({
+                "type": "embedding_cache",
+                "priority": "high",
+                "description": "Aumentar TTL de embeddings",
+                "impact": "Reducir recálculo de embeddings"
+            })
+        
+        if stats["overall"]["similarity_matches"] < 10:
+            optimizations.append({
+                "type": "similarity_detection",
+                "priority": "medium",
+                "description": "Mejorar detección de consultas similares",
+                "impact": "Aumentar hits por similaridad semántica"
+            })
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "performance": {
+                "hit_rate": hit_rate,
+                "avg_latency_ms": round(avg_latency, 1),
+                "latency_improvement_percent": round(latency_improvement, 1),
+                "throughput_multiplier": round(max_throughput_with_cache, 1),
+                "requests_per_second": round(max_throughput_with_cache, 1)
+            },
+            "latency_breakdown": {
+                "cache_hit": f"{cache_hit_latency}ms",
+                "cache_miss": f"{cache_miss_latency}ms",
+                "average": f"{avg_latency:.1f}ms"
+            },
+            "cost_analysis": {
+                "embedding_cost_reduction": f"{stats['by_component']['embeddings']['hit_rate']:.1f}%",
+                "llm_cost_reduction": f"{stats['by_component']['llm_responses']['hit_rate']:.1f}%",
+                "overall_cost_reduction": f"{min(80, hit_rate * 0.8):.1f}%"
+            },
+            "optimizations": optimizations,
+            "health": {
+                "status": "excellent" if hit_rate > 80 else
+                         "good" if hit_rate > 60 else
+                         "needs_attention",
+                "cache_efficiency": "high" if hit_rate > 70 else "medium" if hit_rate > 40 else "low",
+                "similarity_detection": "active" if stats["overall"]["similarity_matches"] > 0 else "inactive"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analizando performance de cache RAG: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ===============================
 # MÉTRICAS DE PERFORMANCE
 # ===============================
 
@@ -673,4 +940,283 @@ async def get_system_alerts():
         
     except Exception as e:
         logger.error(f"Error obteniendo alertas: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 🧠 MONITOREO CACHE SEMÁNTICO
+@router.get("/cache/semantic", response_model=Dict[str, Any])
+async def get_semantic_cache_stats():
+    """
+    Obtiene estadísticas detalladas del cache semántico
+    
+    Incluye:
+    - Performance de cache (hit rates, latencia)
+    - Análisis semántico (similaridad, intenciones)
+    - Métricas de embeddings
+    - Configuración actual
+    """
+    try:
+        # Importar dinámicamente para evitar errores si no está disponible
+        try:
+            from app.services.rag_semantic_cache import get_semantic_cache_stats
+            semantic_stats = get_semantic_cache_stats()
+            semantic_available = True
+        except ImportError:
+            semantic_stats = {"error": "Cache semántico no disponible"}
+            semantic_available = False
+        
+        # Estadísticas del cache básico para comparación
+        try:
+            from app.services.rag_cache_service import rag_cache_service
+            basic_stats = rag_cache_service.get_cache_stats()
+        except Exception:
+            basic_stats = {"error": "Cache básico no disponible"}
+        
+        # Estadísticas del cache manager
+        try:
+            from app.core.cache_manager import cache_manager
+            manager_stats = cache_manager.get_stats()
+        except Exception:
+            manager_stats = {"error": "Cache manager no disponible"}
+        
+        return {
+            "semantic_cache": {
+                "available": semantic_available,
+                "stats": semantic_stats
+            },
+            "basic_cache": basic_stats,
+            "cache_manager": manager_stats,
+            "comparison": _generate_cache_comparison(semantic_stats, basic_stats) if semantic_available else None,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo estadísticas de cache semántico: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+@router.get("/cache/semantic/performance", response_model=Dict[str, Any])
+async def get_semantic_performance_metrics():
+    """
+    Métricas de performance específicas del cache semántico
+    """
+    try:
+        from app.services.rag_semantic_cache import semantic_cache_service
+        
+        stats = semantic_cache_service.get_stats()
+        
+        # Calcular métricas derivadas
+        total_queries = stats["cache_performance"]["total_queries"]
+        exact_hits = stats["cache_performance"]["exact_hits"]
+        semantic_hits = stats["cache_performance"]["semantic_hits"]
+        cache_misses = stats["cache_performance"]["cache_misses"]
+        
+        # Métricas de eficiencia
+        efficiency_metrics = {
+            "overall_hit_rate": round(((exact_hits + semantic_hits) / max(total_queries, 1)) * 100, 2),
+            "exact_hit_rate": round((exact_hits / max(total_queries, 1)) * 100, 2),
+            "semantic_hit_rate": round((semantic_hits / max(total_queries, 1)) * 100, 2),
+            "miss_rate": round((cache_misses / max(total_queries, 1)) * 100, 2),
+            "semantic_intelligence_ratio": round((semantic_hits / max(exact_hits + semantic_hits, 1)) * 100, 2)
+        }
+        
+        # Análisis de performance
+        performance_analysis = {
+            "avg_lookup_time": stats["performance_metrics"]["avg_cache_lookup_ms"],
+            "avg_embedding_time": stats["performance_metrics"]["avg_embedding_generation_ms"],
+            "avg_similarity_time": stats["performance_metrics"]["avg_similarity_calculation_ms"],
+            "total_time_saved_estimate": _calculate_time_saved(stats),
+            "cost_savings_estimate": _calculate_cost_savings(stats)
+        }
+        
+        return {
+            "efficiency_metrics": efficiency_metrics,
+            "performance_analysis": performance_analysis,
+            "raw_stats": stats,
+            "recommendations": _generate_performance_recommendations(stats),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Cache semántico no disponible")
+    except Exception as e:
+        logger.error(f"Error obteniendo métricas de performance: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+@router.post("/cache/semantic/strategy", response_model=Dict[str, Any])
+async def change_semantic_cache_strategy(strategy: str):
+    """
+    Cambia la estrategia del cache semántico
+    
+    Estrategias disponibles:
+    - exact_only: Solo cache exacto
+    - semantic_smart: Cache semántico inteligente (recomendado)
+    - aggressive: Cache agresivo (más hits, menos precisión)
+    - conservative: Cache conservador (más precisión, menos hits)
+    """
+    try:
+        from app.services.rag_semantic_cache import semantic_cache_service, CacheStrategy
+        
+        # Validar estrategia
+        valid_strategies = [s.value for s in CacheStrategy]
+        if strategy not in valid_strategies:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Estrategia inválida. Opciones: {valid_strategies}"
+            )
+        
+        # Cambiar estrategia
+        old_strategy = semantic_cache_service.strategy.value
+        semantic_cache_service.strategy = CacheStrategy(strategy)
+        semantic_cache_service.similarity_thresholds = semantic_cache_service.SIMILARITY_THRESHOLDS[CacheStrategy(strategy)]
+        
+        # Resetear estadísticas para nueva medición
+        semantic_cache_service.reset_stats()
+        
+        return {
+            "message": f"Estrategia cambiada de '{old_strategy}' a '{strategy}'",
+            "old_strategy": old_strategy,
+            "new_strategy": strategy,
+            "new_thresholds": {
+                level.value: threshold 
+                for level, threshold in semantic_cache_service.similarity_thresholds.items()
+            },
+            "stats_reset": True,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Cache semántico no disponible")
+    except Exception as e:
+        logger.error(f"Error cambiando estrategia: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+@router.delete("/cache/semantic/clear", response_model=Dict[str, Any])
+async def clear_semantic_cache():
+    """
+    Limpia el cache semántico (embeddings y búsquedas)
+    """
+    try:
+        from app.core.cache_manager import cache_manager
+        
+        # Limpiar namespaces del cache semántico
+        semantic_namespaces = [
+            "semantic_embeddings",
+            "semantic_searches",
+            "similarity_matrix",
+            "intent_classification"
+        ]
+        
+        cleared_count = 0
+        for namespace in semantic_namespaces:
+            try:
+                count = await cache_manager.clear_namespace(namespace)
+                cleared_count += count
+            except Exception as e:
+                logger.warning(f"Error limpiando namespace {namespace}: {e}")
+        
+        # Resetear estadísticas
+        try:
+            from app.services.rag_semantic_cache import semantic_cache_service
+            semantic_cache_service.reset_stats()
+            semantic_cache_service._embedding_cache.clear()
+            semantic_cache_service._similarity_cache.clear()
+            stats_reset = True
+        except ImportError:
+            stats_reset = False
+        
+        return {
+            "message": "Cache semántico limpiado exitosamente",
+            "cleared_entries": cleared_count,
+            "cleared_namespaces": semantic_namespaces,
+            "stats_reset": stats_reset,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error limpiando cache semántico: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+# Funciones auxiliares para análisis
+
+def _generate_cache_comparison(semantic_stats: Dict, basic_stats: Dict) -> Dict[str, Any]:
+    """Genera comparación entre cache semántico y básico"""
+    try:
+        semantic_hit_rate = semantic_stats.get("cache_performance", {}).get("hit_rate_percentage", 0)
+        basic_hit_rate = basic_stats.get("cache_performance", {}).get("hit_rate_percentage", 0)
+        
+        return {
+            "hit_rate_improvement": round(semantic_hit_rate - basic_hit_rate, 2),
+            "semantic_advantage": semantic_hit_rate > basic_hit_rate,
+            "semantic_hit_rate": semantic_hit_rate,
+            "basic_hit_rate": basic_hit_rate,
+            "intelligence_features": {
+                "similarity_detection": semantic_stats.get("semantic_analysis", {}).get("similarity_calculations", 0) > 0,
+                "intent_detection": semantic_stats.get("semantic_analysis", {}).get("intent_detections", 0) > 0,
+                "advanced_normalization": True
+            }
+        }
+    except Exception:
+        return {"error": "No se pudo generar comparación"}
+
+def _calculate_time_saved(stats: Dict) -> float:
+    """Calcula tiempo estimado ahorrado por el cache"""
+    try:
+        hits = stats["cache_performance"]["exact_hits"] + stats["cache_performance"]["semantic_hits"]
+        avg_lookup_time = stats["performance_metrics"]["avg_cache_lookup_ms"]
+        avg_generation_time = stats["performance_metrics"]["avg_embedding_generation_ms"]
+        
+        # Tiempo ahorrado = hits * (tiempo_generación - tiempo_lookup)
+        time_saved_per_hit = max(avg_generation_time - avg_lookup_time, 0)
+        total_time_saved = hits * time_saved_per_hit
+        
+        return round(total_time_saved, 2)
+    except Exception:
+        return 0.0
+
+def _calculate_cost_savings(stats: Dict) -> Dict[str, float]:
+    """Calcula ahorros estimados de costos"""
+    try:
+        hits = stats["cache_performance"]["exact_hits"] + stats["cache_performance"]["semantic_hits"]
+        
+        # Estimaciones de costos (valores aproximados)
+        cost_per_embedding = 0.0001  # USD por embedding
+        cost_per_llm_call = 0.002    # USD por llamada LLM
+        
+        embedding_savings = hits * cost_per_embedding
+        llm_savings = hits * cost_per_llm_call * 0.8  # 80% de hits evitan LLM
+        
+        return {
+            "embedding_cost_savings_usd": round(embedding_savings, 4),
+            "llm_cost_savings_usd": round(llm_savings, 4),
+            "total_savings_usd": round(embedding_savings + llm_savings, 4)
+        }
+    except Exception:
+        return {"error": "No se pudo calcular ahorros"}
+
+def _generate_performance_recommendations(stats: Dict) -> List[str]:
+    """Genera recomendaciones basadas en las estadísticas"""
+    recommendations = []
+    
+    try:
+        hit_rate = stats["cache_performance"]["hit_rate_percentage"]
+        semantic_hit_rate = stats["cache_performance"]["semantic_hit_rate"]
+        avg_similarity = stats["semantic_analysis"]["avg_similarity_score"]
+        
+        if hit_rate < 70:
+            recommendations.append("Hit rate bajo (<70%). Considerar estrategia más agresiva.")
+        
+        if semantic_hit_rate < 20:
+            recommendations.append("Pocos hits semánticos. Verificar normalización de consultas.")
+        
+        if avg_similarity < 0.8:
+            recommendations.append("Similaridad promedio baja. Revisar umbrales de similaridad.")
+        
+        if stats["performance_metrics"]["avg_embedding_generation_ms"] > 500:
+            recommendations.append("Generación de embeddings lenta. Considerar optimización del modelo.")
+        
+        if len(recommendations) == 0:
+            recommendations.append("Performance óptima. Sistema funcionando correctamente.")
+            
+    except Exception:
+        recommendations.append("Error generando recomendaciones.")
+    
+    return recommendations 
