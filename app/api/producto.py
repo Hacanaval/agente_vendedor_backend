@@ -14,17 +14,93 @@ router = APIRouter(prefix="/productos", tags=["productos"])
 
 @router.post("/", response_model=ProductoOut)
 async def create_producto(producto: ProductoCreate, db: AsyncSession = Depends(get_db)):
-    db_producto = Producto(**producto.dict())
-    db.add(db_producto)
-    await db.commit()
-    await db.refresh(db_producto)
-    return db_producto
+    """
+    ✅ CORREGIDO: Crea un nuevo producto con manejo inteligente de duplicados
+    """
+    try:
+        # ✅ CORREGIDO: Usar model_dump() para Pydantic v2 en lugar de dict()
+        producto_data = producto.model_dump()
+        
+        # Verificar si ya existe un producto con ese nombre
+        result = await db.execute(
+            select(Producto).where(Producto.nombre == producto.nombre)
+        )
+        existing_producto = result.scalar_one_or_none()
+        
+        if existing_producto:
+            # ✅ OPCIÓN A: Actualizar producto existente (RECOMENDADO PARA TESTING)
+            existing_producto.descripcion = producto_data["descripcion"]
+            existing_producto.precio = float(producto_data["precio"])
+            existing_producto.stock = int(producto_data["stock"])
+            existing_producto.categoria = producto_data["categoria"]
+            existing_producto.activo = True
+            
+            await db.commit()
+            await db.refresh(existing_producto)
+            
+            logging.info(f"Producto actualizado: {existing_producto.nombre}")
+            return existing_producto
+            
+            # ✅ OPCIÓN B: Generar nombre único (comentado - descomentar si prefieres)
+            # import time
+            # producto_data["nombre"] = f"{producto.nombre} ({int(time.time())})"
+        
+        # Crear nuevo producto si no existe
+        db_producto = Producto(
+            nombre=producto_data["nombre"],
+            descripcion=producto_data["descripcion"],
+            precio=float(producto_data["precio"]),  # Asegurar que sea float
+            stock=int(producto_data["stock"]),      # Asegurar que sea int
+            categoria=producto_data["categoria"],
+            activo=True  # Por defecto activo
+        )
+        
+        db.add(db_producto)
+        await db.commit()
+        await db.refresh(db_producto)
+        
+        logging.info(f"Producto creado: {db_producto.nombre}")
+        return db_producto
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logging.error(f"Error creando producto: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error interno al crear el producto: {str(e)}"
+        )
 
 @router.get("/", response_model=List[ProductoOut])
 async def list_productos(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Producto))
     productos = result.scalars().all()
     return productos
+
+@router.get("/{producto_id}", response_model=ProductoOut)
+async def obtener_producto(producto_id: int, db: AsyncSession = Depends(get_db)):
+    """Obtiene un producto específico por ID"""
+    try:
+        result = await db.execute(select(Producto).where(Producto.id == producto_id))
+        producto = result.scalar_one_or_none()
+        
+        if not producto:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Producto con ID {producto_id} no encontrado"
+            )
+        
+        return producto
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error obteniendo producto {producto_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error interno al obtener el producto: {str(e)}"
+        )
 
 @router.post("/reemplazar_csv", summary="Reemplaza el inventario de productos a partir de un CSV")
 async def reemplazar_csv(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):

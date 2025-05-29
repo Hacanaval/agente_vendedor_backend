@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.services.chat_control_service import ChatControlService
@@ -20,9 +20,9 @@ router = APIRouter(prefix="/chat-control", tags=["Control de Chatbot"])
 
 @router.post("/sistema/toggle", response_model=ControlGlobalResponse)
 async def toggle_sistema_ia(
-    activar: bool = Body(..., description="True para activar, False para desactivar"),
-    usuario: Optional[str] = Body(None, description="Usuario que realiza el cambio"),
-    motivo: Optional[str] = Body(None, description="Motivo del cambio"),
+    activar: bool = Query(..., description="True para activar, False para desactivar"),
+    usuario: Optional[str] = Query(None, description="Usuario que realiza el cambio"),
+    motivo: Optional[str] = Query(None, description="Motivo del cambio"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -94,9 +94,9 @@ async def get_estado_sistema_ia(db: AsyncSession = Depends(get_db)):
 @router.post("/conversacion/{chat_id}/toggle", response_model=ControlConversacionResponse)
 async def toggle_ia_conversacion(
     chat_id: str,
-    activar: bool = Body(..., description="True para activar IA, False para que continúe un humano"),
-    usuario: Optional[str] = Body(None, description="Usuario que realiza el cambio"),
-    motivo: Optional[str] = Body(None, description="Motivo del cambio"),
+    activar: bool = Query(..., description="True para activar IA, False para que continúe un humano"),
+    usuario: Optional[str] = Query(None, description="Usuario que realiza el cambio"),
+    motivo: Optional[str] = Query(None, description="Motivo del cambio"),
     db: AsyncSession = Depends(get_db)
 ):
     """

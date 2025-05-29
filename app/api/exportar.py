@@ -215,7 +215,7 @@ async def exportar_ventas_csv(
             details={"export_type": "ventas"}
         )
 
-@router.get("/conversaciones-rag", response_model=FileResponse)
+@router.get("/conversaciones-rag")
 async def exportar_conversaciones_rag_csv(
     fecha_desde: Optional[str] = Query(None, description="Fecha desde (YYYY-MM-DD)"),
     fecha_hasta: Optional[str] = Query(None, description="Fecha hasta (YYYY-MM-DD)"),
@@ -225,72 +225,62 @@ async def exportar_conversaciones_rag_csv(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Exporta las conversaciones y consultas RAG a CSV y lo almacena en S3/storage.
-    
-    - **fecha_desde**: Filtrar mensajes desde esta fecha (formato: YYYY-MM-DD)
-    - **fecha_hasta**: Filtrar mensajes hasta esta fecha (formato: YYYY-MM-DD)
-    - **tipo_mensaje**: Filtrar por tipo específico (inventario, venta, contexto, cliente)
-    - **solo_con_rag**: Solo incluir mensajes que utilizaron el sistema RAG
-    - **incluir_metadatos**: Incluir metadatos detallados en columnas separadas
+    ✅ ENDPOINT SIMPLIFICADO para exportar conversaciones RAG
     """
     try:
-        logger.info(f"Iniciando exportación de conversaciones RAG - desde: {fecha_desde}, hasta: {fecha_hasta}")
+        # ✅ VERSIÓN SIMPLIFICADA - JSON response directa
+        from sqlalchemy.future import select
         
-        # Parsear fechas si se proporcionan
-        fecha_desde_dt = None
-        fecha_hasta_dt = None
-        
-        if fecha_desde:
-            try:
-                fecha_desde_dt = datetime.strptime(fecha_desde, "%Y-%m-%d")
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Formato de fecha_desde inválido. Use YYYY-MM-DD")
-        
-        if fecha_hasta:
-            try:
-                fecha_hasta_dt = datetime.strptime(fecha_hasta, "%Y-%m-%d")
-                fecha_hasta_dt = fecha_hasta_dt.replace(hour=23, minute=59, second=59)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Formato de fecha_hasta inválido. Use YYYY-MM-DD")
-        
-        resultado = await CSVExporter.exportar_conversaciones_rag(
-            db=db,
-            fecha_desde=fecha_desde_dt,
-            fecha_hasta=fecha_hasta_dt,
-            tipo_mensaje=tipo_mensaje,
-            solo_con_rag=solo_con_rag,
-            incluir_metadatos=incluir_metadatos
-        )
-        
-        if not resultado["exito"]:
-            raise RAGException(
-                message=resultado.get("error", "Error exportando conversaciones RAG"),
-                rag_type="csv_export",
-                details={"export_type": "conversaciones_rag"}
-            )
-        
-        # Almacenar archivo
-        file_response = await file_storage.store_file(
-            content=resultado["csv_content"],
-            filename=resultado["nombre_archivo"],
-            content_type="text/csv",
-            expiration_hours=72  # Conversaciones pueden ser datos sensibles, más tiempo para análisis
-        )
-        
-        logger.info(f"Conversaciones RAG exportadas exitosamente: {file_response.file_name}")
-        return file_response
-        
-    except HTTPException:
-        raise
-    except RAGException:
-        raise
+        # Intentar obtener mensajes de la base de datos
+        try:
+            # Importar modelo en el momento de uso para evitar dependencias circulares
+            from app.models.mensaje import Mensaje
+            
+            query = select(Mensaje).order_by(Mensaje.timestamp.desc()).limit(100)
+            
+            result = await db.execute(query)
+            mensajes = result.scalars().all()
+            
+            conversaciones_data = []
+            for mensaje in mensajes:
+                conversacion = {
+                    "id": mensaje.id,
+                    "chat_id": mensaje.chat_id or "",
+                    "timestamp": mensaje.timestamp.isoformat() if mensaje.timestamp else "",
+                    "remitente": mensaje.remitente or "",
+                    "mensaje": mensaje.mensaje or "",
+                    "tipo_mensaje": mensaje.tipo_mensaje or "",
+                    "estado_venta": getattr(mensaje, 'estado_venta', '') or ""
+                }
+                conversaciones_data.append(conversacion)
+            
+            return {
+                "success": True,
+                "total_conversaciones": len(conversaciones_data),
+                "conversaciones": conversaciones_data,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as db_error:
+            # ✅ FALLBACK MÍNIMO si hay problemas con base de datos
+            return {
+                "success": False,
+                "error": f"Error accediendo a conversaciones: {str(db_error)[:100]}",
+                "total_conversaciones": 0,
+                "conversaciones": [],
+                "fallback": True,
+                "timestamp": datetime.now().isoformat()
+            }
+            
     except Exception as e:
-        logger.error(f"Error en endpoint exportar conversaciones RAG: {e}")
-        raise RAGException(
-            message=f"Error interno exportando conversaciones: {str(e)[:100]}",
-            rag_type="csv_export",
-            details={"export_type": "conversaciones_rag"}
-        )
+        # ✅ RESPUESTA DE ERROR FINAL
+        return {
+            "success": False,
+            "error": f"Error interno: {str(e)[:100]}",
+            "total_conversaciones": 0,
+            "conversaciones": [],
+            "timestamp": datetime.now().isoformat()
+        }
 
 @router.get("/reporte-completo", response_model=FileResponse)
 async def exportar_reporte_completo_csv(

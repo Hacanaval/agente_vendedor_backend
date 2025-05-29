@@ -8,8 +8,93 @@ from app.services.pedidos import PedidoManager
 from typing import List, Optional
 import json
 from datetime import datetime, timedelta
+from pydantic import BaseModel
+
+# ✅ NUEVO: Schema para crear pedidos
+class ProductoPedido(BaseModel):
+    producto_id: int
+    cantidad: int
+    precio_unitario: float
+
+class PedidoCreate(BaseModel):
+    chat_id: str
+    productos: List[ProductoPedido]
+    cliente_cedula: str
+    cliente_nombre: str
+    cliente_telefono: str
+    observaciones: Optional[str] = None
 
 router = APIRouter(prefix="/pedidos", tags=["pedidos"])
+
+# ✅ NUEVO: Endpoint POST para crear pedidos
+@router.post("/", summary="Crear nuevo pedido")
+async def crear_pedido(
+    data: PedidoCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Crea un nuevo pedido desde el frontend"""
+    try:
+        # Calcular total
+        total = sum(p.cantidad * p.precio_unitario for p in data.productos)
+        
+        # Preparar datos de productos
+        productos_data = [
+            {
+                "producto_id": p.producto_id,
+                "cantidad": p.cantidad,
+                "precio_unitario": p.precio_unitario,
+                "total": p.cantidad * p.precio_unitario
+            }
+            for p in data.productos
+        ]
+        
+        # Preparar metadatos
+        metadatos = {
+            "productos": productos_data,
+            "datos_cliente": {
+                "cedula": data.cliente_cedula,
+                "nombre": data.cliente_nombre,
+                "telefono": data.cliente_telefono
+            },
+            "total": total,
+            "observaciones": data.observaciones or "",
+            "origen": "frontend"
+        }
+        
+        # Crear mensaje de pedido
+        mensaje = Mensaje(
+            chat_id=data.chat_id,
+            remitente="cliente",
+            mensaje=f"Pedido creado desde frontend - Total: ${total}",
+            tipo_mensaje="venta",
+            estado_venta="pendiente",
+            metadatos=metadatos,
+            timestamp=datetime.now()
+        )
+        
+        db.add(mensaje)
+        await db.flush()
+        await db.refresh(mensaje)
+        await db.commit()
+        
+        return {
+            "id": mensaje.id,
+            "chat_id": data.chat_id,
+            "estado": "pendiente",
+            "total": total,
+            "productos": productos_data,
+            "cliente": {
+                "cedula": data.cliente_cedula,
+                "nombre": data.cliente_nombre,
+                "telefono": data.cliente_telefono
+            },
+            "fecha": mensaje.timestamp.isoformat(),
+            "message": "Pedido creado exitosamente"
+        }
+        
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al crear pedido: {str(e)}")
 
 @router.get("/", summary="Listar todos los pedidos")
 async def listar_pedidos(
