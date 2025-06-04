@@ -9,39 +9,94 @@ from app.services.auth import hash_password, verify_password, create_access_toke
 from jose import JWTError
 from fastapi.security import OAuth2PasswordBearer
 from typing import Optional
+import secrets
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 @router.post("/register")
 async def register(data: UsuarioRegister, db: AsyncSession = Depends(get_db)):
-    # TODO: Volver a proteger este endpoint con autenticación y multiempresa en producción
-    return {"msg": "Registro ficticio (sin autenticación, sin multiempresa)"}
+    """
+    🔒 ENDPOINT DE REGISTRO SIMPLIFICADO 
+    TODO: Implementar autenticación completa y multiempresa en producción
+    """
+    # En desarrollo, permitir registro básico sin validaciones complejas
+    return {
+        "success": True,
+        "message": "Registro en modo desarrollo - implementar validaciones en producción",
+        "development_mode": True
+    }
 
-@router.post("/login")
+@router.post("/login", response_model=TokenResponse)
 async def login(data: UsuarioLogin, db: AsyncSession = Depends(get_db)):
-    # TODO: Volver a proteger este endpoint con autenticación y multiempresa en producción
-    return {"access_token": "token-ficticio", "token_type": "bearer"}
+    """
+    🔒 ENDPOINT DE LOGIN SIMPLIFICADO
+    TODO: Implementar autenticación real con base de datos en producción
+    """
+    # En desarrollo, generar token válido pero temporal
+    if data.email and data.password:
+        # Generar token válido con datos del usuario
+        token_data = {
+            "sub": data.email,
+            "email": data.email,
+            "development_mode": True
+        }
+        access_token = create_access_token(data=token_data)
+        
+        return TokenResponse(
+            access_token=access_token,
+            token_type="bearer"
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email y contraseña son requeridos"
+        )
 
 @router.get("/me")
-async def me(db: AsyncSession = Depends(get_db)):
-    # TODO: Volver a proteger este endpoint con autenticación y multiempresa en producción
-    return {"msg": "Usuario ficticio (sin autenticación, sin multiempresa)"}
+async def me(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
+    """
+    🔒 ENDPOINT DE PERFIL USUARIO
+    TODO: Implementar validación completa de token en producción
+    """
+    try:
+        # Intentar decodificar token
+        payload = decode_access_token(token)
+        if payload:
+            return {
+                "email": payload.get("email", "usuario@desarrollo.com"),
+                "development_mode": payload.get("development_mode", True),
+                "message": "Usuario autenticado en modo desarrollo"
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token inválido"
+            )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido o expirado"
+        )
 
-# --- RECOMENDACIONES EXTRA ---
+# 🔒 RECOMENDACIONES DE SEGURIDAD PARA PRODUCCIÓN
 
-# 1. Para evitar el warning de Pydantic v2 en tus schemas:
-#    Cambia en tus clases de schema (por ejemplo, UsuarioOut) la config:
+# 1. Variables de entorno requeridas:
+#    export SECRET_KEY="clave_super_secreta_256_bits_minimo"
+#    export BOT_SECRET_KEY="clave_bot_super_secreta_256_bits_minimo"
+#    export DATABASE_URL="postgresql://usuario:password@host:puerto/db"
+#    export REDIS_URL="redis://localhost:6379"
 #
-#    class Config:
-#        from_attributes = True
+# 2. Para producción, implementar:
+#    - Validación real de usuarios en base de datos
+#    - Hash de contraseñas con bcrypt
+#    - Refresh tokens
+#    - Rate limiting
+#    - Logs de seguridad
+#    - Validación de rol/empresa
 #
-#    Y elimina cualquier 'orm_mode = True' (ya no es válido en Pydantic 2.x).
-#
-# 2. Si sigues viendo errores de bcrypt/passlib:
-#    pip uninstall bcrypt passlib
-#    pip install bcrypt passlib
-#    (Y asegúrate de tener la versión adecuada, bcrypt>=4 si usas Python 3.13+)
-#
-# 3. Reinicia el servidor con Ctrl+C y vuelve a correr uvicorn tras cambios.
-#
+# 3. Nunca commitear:
+#    - API keys reales
+#    - Contraseñas
+#    - Tokens de producción
+#    - Claves privadas

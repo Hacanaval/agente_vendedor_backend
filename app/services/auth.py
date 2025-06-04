@@ -3,13 +3,23 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional
 import os
+import secrets
 
 # Configuración de hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Configuración de JWT
-SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")
-BOT_SECRET_KEY = os.getenv("BOT_SECRET_KEY", "BOT_SECRET_KEY")  # Clave fija para el token del bot
+# 🔒 Configuración de JWT con claves seguras
+def generate_secure_key():
+    """Genera una clave segura aleatoria si no se proporciona"""
+    return secrets.token_urlsafe(32)
+
+SECRET_KEY = os.getenv("SECRET_KEY", generate_secure_key())
+BOT_SECRET_KEY = os.getenv("BOT_SECRET_KEY", generate_secure_key())
+
+# ⚠️ IMPORTANTE: En producción SIEMPRE configura estas variables de entorno:
+# export SECRET_KEY="tu_clave_secreta_super_segura_aqui"
+# export BOT_SECRET_KEY="tu_clave_bot_super_segura_aqui"
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 

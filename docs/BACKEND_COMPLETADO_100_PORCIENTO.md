@@ -53,13 +53,19 @@
 REDIS_URL=redis://localhost:6379
 ENVIRONMENT=development
 
-# API Keys
-GOOGLE_API_KEY=AIzaSyBk65cA2j757x6nP1PUdk_JNhbJzAxZoB8
-OPENAI_API_KEY=sk-proj-RjrXfGn0XJmRkHs8qUN8v91ReChUD8LZkZEKcl-rfDsDXQLdYFaeLUpIXqmPIaeN8Pt_oglvbbT3BlbkFJ1QW
+# 🔒 API Keys (REEMPLAZA CON TUS CLAVES REALES)
+GOOGLE_API_KEY=tu_clave_google_gemini_aqui
+OPENAI_API_KEY=tu_clave_openai_aqui
 
 # Database
 DATABASE_URL=sqlite+aiosqlite:///./app.db
 ```
+
+**⚠️ IMPORTANTE DE SEGURIDAD:**
+- **NUNCA** commits claves API reales al repositorio
+- Usa archivos `.env` que están en `.gitignore` 
+- Las claves de arriba son solo ejemplos - usa tus claves reales en local
+- Para producción usa variables de entorno del servidor
 
 ### **Servicios en Ejecución:**
 - 🔴 **Redis Server**: Puerto 6379 (homebrew.mxcl.redis)

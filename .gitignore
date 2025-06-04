@@ -53,12 +53,33 @@ env.bak/
 venv.bak/
 .venv/
 
-# Environment variables
+# 🔒 ARCHIVOS SENSIBLES Y DE SEGURIDAD (CRÍTICO)
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+.environment
+*.env
+env.txt
+secrets.txt
+secrets.json
+secrets.yaml
+secrets.yml
+config.json
+config.yaml
+config.yml
+# API Keys y tokens
+api_keys.txt
+tokens.txt
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+# Credenciales de base de datos
+database.conf
+db_credentials.txt
+# Configuraciones de producción
+production.conf
+staging.conf
 
 # IDE
 .vscode/
@@ -209,7 +230,22 @@ ipython_config.py
 #   install all needed dependencies.
 #Pipfile.lock
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow
+# poetry
+#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
+#   This is especially recommended for binary packages to ensure reproducibility, and is more
+#   commonly ignored for libraries.
+#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
+#poetry.lock
+
+# pdm
+#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
+#pdm.lock
+#   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
+#   in version control.
+#   https://pdm.fming.dev/#use-with-ide
+.pdm.toml
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
 __pypackages__/
 
 # Celery stuff
@@ -245,6 +281,12 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
 
 # SQLite databases
 *.db

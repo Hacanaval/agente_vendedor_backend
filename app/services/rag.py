@@ -114,19 +114,19 @@ async def _consultar_rag_internal(
                 # Timeout para consultas de historial
                 result = await asyncio.wait_for(
                     db.execute(
-                        select(Mensaje)
-                        .where(Mensaje.chat_id == chat_id)
-                        .order_by(Mensaje.timestamp.desc())
-                        .limit(10)
+                select(Mensaje)
+                .where(Mensaje.chat_id == chat_id)
+                .order_by(Mensaje.timestamp.desc())
+                .limit(10)
                     ),
                     timeout=3.0  # Timeout corto para BD
-                )
-                historial = result.scalars().all()[::-1]  # Orden cronológico
-                historial_contexto = "\n".join([
-                    f"{m.remitente}: {m.mensaje}" + 
-                    (f" (Estado: {m.estado_venta})" if m.estado_venta else "")
-                    for m in historial
-                ])
+            )
+            historial = result.scalars().all()[::-1]  # Orden cronológico
+            historial_contexto = "\n".join([
+                f"{m.remitente}: {m.mensaje}" + 
+                (f" (Estado: {m.estado_venta})" if m.estado_venta else "")
+                for m in historial
+            ])
                 logger.info(f"[RAG] Historial obtenido: {len(historial)} mensajes")
                 
             except asyncio.TimeoutError:
@@ -176,9 +176,9 @@ async def _consultar_rag_internal(
                 )
             except Exception as e:
                 logger.error(f"Error en RAG_CLIENTES: {e}")
-                return {
+                    return {
                     "respuesta": "Hubo un error procesando tu consulta de cliente. Por favor, intenta de nuevo.",
-                    "estado_venta": None,
+                        "estado_venta": None,
                     "tipo_mensaje": "cliente",
                     "metadatos": {"error": True, "subsistema": "RAG_CLIENTES"}
                 }
@@ -216,17 +216,17 @@ async def _consultar_rag_internal(
                 
             except asyncio.TimeoutError:
                 logger.warning("Timeout en RAG_EMPRESA")
-                return {
+                    return {
                     "respuesta": "Lo siento, el sistema está experimentando demoras. Estamos aquí para ayudarte con información sobre Sextinvalle.",
-                    "estado_venta": None,
+                        "estado_venta": None,
                     "tipo_mensaje": "empresa",
                     "metadatos": {"timeout": True}
                 }
             except Exception as e:
                 logger.error(f"Error en RAG_EMPRESA: {e}")
-                return {
+                    return {
                     "respuesta": "Hubo un error procesando tu consulta. ¿En qué puedo ayudarte sobre Sextinvalle?",
-                    "estado_venta": None,
+                        "estado_venta": None,
                     "tipo_mensaje": "empresa", 
                     "metadatos": {"error": True, "subsistema": "RAG_EMPRESA"}
                 }
@@ -257,9 +257,9 @@ async def _consultar_rag_internal(
                 
     except Exception as e:
         logger.error(f"Error crítico en _consultar_rag_internal: {str(e)}", exc_info=True)
-        return {
+            return {
             "respuesta": "Lo siento, ocurrió un error interno. Por favor, intenta nuevamente o contacta soporte.",
-            "estado_venta": None,
+                "estado_venta": None,
             "tipo_mensaje": "error",
             "metadatos": {"error_critico": True, "tipo_original": tipo}
         }
@@ -347,7 +347,7 @@ async def retrieval_inventario(mensaje: str, db):
                     )
                 except Exception as e:
                     logger.warning(f"Error cacheando consulta general: {e}")
-            else:
+                    else:
                 # Fallback al cache básico
                 await cache_rag_search(
                     mensaje, [], [], limit=8, 
@@ -384,7 +384,7 @@ async def retrieval_inventario(mensaje: str, db):
                         search_products_semantic(mensaje, top_k=8), 
                         timeout=3.0
                     )
-            else:
+                        else:
                 # Fallback al cache básico de embeddings
                 cached_embedding = await get_cached_rag_embedding(mensaje)
                 if cached_embedding is not None:
@@ -394,7 +394,7 @@ async def retrieval_inventario(mensaje: str, db):
                         search_products_semantic(mensaje, top_k=8, cached_embedding=cached_embedding), 
                         timeout=3.0
                     )
-                else:
+                    else:
                     logger.info(f"[EMBEDDING_MISS] Generando nuevo embedding")
                     productos_semanticos = await asyncio.wait_for(
                         search_products_semantic(mensaje, top_k=8), 
@@ -472,26 +472,26 @@ async def retrieval_inventario(mensaje: str, db):
 
 async def _handle_consulta_general(db) -> str:
     """Maneja consultas generales del catálogo"""
-    try:
-        result = await db.execute(
-            select(Producto).where(
-                Producto.activo == True,
-                Producto.stock > 0
+            try:
+                result = await db.execute(
+                select(Producto).where(
+                    Producto.activo == True,
+                    Producto.stock > 0
             ).order_by(Producto.nombre).limit(20)
-        )
+                )
         productos = result.scalars().all()
-        
+                
         if not productos:
-            return "Lo siento, actualmente no tenemos productos disponibles en nuestro inventario."
-        
+                    return "Lo siento, actualmente no tenemos productos disponibles en nuestro inventario."
+                
         respuesta_partes = ["🛍️ CATÁLOGO PRINCIPAL:\n"]
         for producto in productos:
-            disponibilidad = "✅ Disponible" if producto.stock > 10 else "⚠️ Stock limitado"
+                    disponibilidad = "✅ Disponible" if producto.stock > 10 else "⚠️ Stock limitado"
             respuesta_partes.append(f"• {producto.nombre} - ${producto.precio:,.0f} ({disponibilidad})")
-        
-        return "\n".join(respuesta_partes)
-        
-    except Exception as e:
+                
+                return "\n".join(respuesta_partes)
+                
+            except Exception as e:
         logger.error(f"Error en consulta general: {e}")
         return "Error al obtener el catálogo. Por favor, intenta de nuevo."
 
@@ -502,7 +502,7 @@ async def _busqueda_tradicional(mensaje: str, db) -> List[Dict[str, Any]]:
     Solo se usa cuando la búsqueda semántica falla o da pocos resultados
     """
     # Palabras irrelevantes filtradas
-    palabras_irrelevantes = {
+        palabras_irrelevantes = {
         "hola", "necesito", "información", "sobre", "quiero", "quisiera", 
         "me", "puedes", "podrías", "ayudar", "con", "para", "del", "de", "la", "el",
         "busco", "buscando", "tengo", "dime", "cuales", "cuáles", "son", "hay"
@@ -546,11 +546,11 @@ async def _busqueda_tradicional(mensaje: str, db) -> List[Dict[str, Any]]:
         return []
     
     # Búsqueda en BD
-    result = await db.execute(
-        select(Producto).where(
+                result = await db.execute(
+                    select(Producto).where(
             or_(*condiciones),
-            Producto.activo == True,
-            Producto.stock > 0
+                        Producto.activo == True,
+                        Producto.stock > 0
         ).limit(5)
     )
     productos = result.scalars().all()
@@ -626,7 +626,7 @@ async def _formatear_resultados_hibridos(
         respuesta_partes.append(f"\n💡 Búsqueda inteligente: {total_semanticos} resultados semánticos")
         if total_tradicionales > 0:
             respuesta_partes.append(f"➕ Búsqueda adicional: {total_tradicionales} resultados complementarios")
-    else:
+            else:
         respuesta_partes.append(f"\n🔍 Búsqueda tradicional: {total_tradicionales} resultados")
     
     return "\n".join(respuesta_partes)

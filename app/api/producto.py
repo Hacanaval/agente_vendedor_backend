@@ -8,7 +8,6 @@ from typing import List
 import pandas as pd
 import io
 import logging
-from app.services.retrieval.retriever_factory import get_retriever
 
 router = APIRouter(prefix="/productos", tags=["productos"])
 
@@ -40,10 +39,6 @@ async def create_producto(producto: ProductoCreate, db: AsyncSession = Depends(g
             
             logging.info(f"Producto actualizado: {existing_producto.nombre}")
             return existing_producto
-            
-            # ✅ OPCIÓN B: Generar nombre único (comentado - descomentar si prefieres)
-            # import time
-            # producto_data["nombre"] = f"{producto.nombre} ({int(time.time())})"
         
         # Crear nuevo producto si no existe
         db_producto = Producto(
@@ -105,93 +100,132 @@ async def obtener_producto(producto_id: int, db: AsyncSession = Depends(get_db))
 @router.post("/reemplazar_csv", summary="Reemplaza el inventario de productos a partir de un CSV")
 async def reemplazar_csv(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
     """
-    Reemplaza el inventario de productos usando un archivo CSV.
+    ✅ ENDPOINT CORREGIDO: Reemplaza el inventario usando CSV.
     
-    📋 REGLAS DE ACTUALIZACIÓN:
-    - Si el nombre existe, actualiza stock, precio y categoria (SIEMPRE)
-    - Si el nombre NO existe, lo crea con los datos del CSV
-    - Si el nombre está en DB y NO viene en el CSV, su stock se actualiza a 0
-    - No afecta el histórico de ventas
+    📋 REGLAS:
+    ✅ CSV + DB: Actualizar precio, stock, descripción y categoría  
+    ✅ DB pero NO CSV: Stock = 0, activo = False (chatbot no los ofrece)
+    ✅ CSV pero NO DB: Crear nuevo producto
     
     📝 COLUMNAS REQUERIDAS: nombre, descripcion, precio, stock
-    📝 COLUMNA OPCIONAL: categoria
-    
-    🏷️ REGLAS DE CATEGORÍA:
-    - Si CSV NO tiene columna 'categoria' → categoria = "General"
-    - Si CSV tiene columna 'categoria' pero celda vacía → categoria = "General"  
-    - Si CSV tiene categoria válida → usa esa categoria
-    - Si producto existe y CSV tiene categoria → ACTUALIZA la categoria
+    📝 COLUMNA OPCIONAL: categoria (si no está, se asigna "General")
     """
     try:
+        # Validaciones básicas del archivo
+        if not file.filename or not file.filename.endswith(".csv"):
+            raise HTTPException(status_code=400, detail="Debe ser un archivo CSV (.csv)")
+        
         content = await file.read()
+        if len(content) == 0:
+            raise HTTPException(status_code=400, detail="El archivo CSV está vacío")
+        
+        # Parsear CSV
         df = pd.read_csv(io.BytesIO(content))
+        if df.empty:
+            raise HTTPException(status_code=400, detail="El CSV no contiene datos")
 
-        # Validar columnas mínimas requeridas
+        # Validar columnas requeridas
         required_cols = {"nombre", "descripcion", "precio", "stock"}
         if not required_cols.issubset(df.columns):
-            raise HTTPException(status_code=400, detail=f"El CSV debe tener las columnas: {', '.join(required_cols)}")
+            missing = required_cols - set(df.columns)
+            raise HTTPException(status_code=400, detail=f"Faltan columnas: {', '.join(missing)}")
 
         # Verificar si hay columna categoria
         tiene_categoria = "categoria" in df.columns
 
-        # 1. Obtener todos los productos actuales en la DB
+        # 1. Obtener productos actuales de la DB
         result = await db.execute(select(Producto))
         productos_db = result.scalars().all()
         nombres_db = {p.nombre: p for p in productos_db}
 
-        nombres_csv = set(df["nombre"])
+        # Obtener nombres válidos del CSV
+        nombres_csv = {str(nombre).strip() for nombre in df["nombre"] if pd.notna(nombre) and str(nombre).strip()}
 
-        # Función para asignar categoria por defecto
-        def asignar_categoria_defecto(nombre, categoria_csv=None):
-            # REGLA 1: Si no hay categoria en CSV o está vacía → "General"
-            if not categoria_csv or str(categoria_csv).strip() == '' or str(categoria_csv).lower() == 'nan':
+        # Función para categoria por defecto
+        def asignar_categoria(cat_csv=None):
+            if not cat_csv or pd.isna(cat_csv) or str(cat_csv).strip() == "":
                 return "General"
-            
-            # Si hay categoria en CSV, usarla
-            return str(categoria_csv).strip()
+            return str(cat_csv).strip()
 
-        # 2. Actualizar/crear productos desde el CSV
+        # Contadores
+        creados, actualizados, desactivados = 0, 0, 0
+
+        # 2. ✅ PROCESAR PRODUCTOS DEL CSV
         for _, row in df.iterrows():
-            nombre = row["nombre"]
-            categoria_csv = row.get("categoria") if tiene_categoria else None
-            categoria_final = asignar_categoria_defecto(nombre, categoria_csv)
-            
-            if nombre in nombres_db:
-                # REGLA 2: Actualiza stock, precio Y categoria (si CSV tiene categoria)
-                producto = nombres_db[nombre]
-                producto.descripcion = row["descripcion"]
-                producto.precio = float(row["precio"])
-                producto.stock = int(row["stock"])
+            nombre = str(row["nombre"]).strip()
+            if not nombre:
+                continue
                 
-                # Siempre actualizar categoria (será "General" si no viene en CSV)
-                producto.categoria = categoria_final
-                producto.activo = producto.stock > 0
-            else:
-                # Crea nuevo producto con categoria final
-                producto = Producto(
-                    nombre=row["nombre"],
-                    descripcion=row["descripcion"],
-                    precio=float(row["precio"]),
-                    stock=int(row["stock"]),
-                    categoria=categoria_final,
-                    activo=int(row["stock"]) > 0
-                )
-                db.add(producto)
+            try:
+                precio = float(row["precio"])
+                stock = int(float(row["stock"]))
+                descripcion = str(row["descripcion"]) if pd.notna(row["descripcion"]) else ""
+                categoria = asignar_categoria(row.get("categoria") if tiene_categoria else None)
+                
+                if nombre in nombres_db:
+                    # ✅ Actualizar existente
+                    p = nombres_db[nombre]
+                    p.descripcion = descripcion
+                    p.precio = precio
+                    p.stock = stock
+                    p.categoria = categoria
+                    p.activo = stock > 0
+                    actualizados += 1
+                else:
+                    # ✅ Crear nuevo
+                    nuevo = Producto(
+                        nombre=nombre,
+                        descripcion=descripcion,
+                        precio=precio,
+                        stock=stock,
+                        categoria=categoria,
+                        activo=stock > 0
+                    )
+                    db.add(nuevo)
+                    creados += 1
+            except ValueError:
+                continue  # Saltar filas con datos inválidos
 
-        # 3. Poner stock=0 a los productos que no vienen en el CSV
-        nombres_no_csv = set(nombres_db.keys()) - nombres_csv
-        for nombre in nombres_no_csv:
-            producto = nombres_db[nombre]
-            producto.stock = 0
-            producto.activo = False
+        # 3. ✅ DESACTIVAR PRODUCTOS NO EN CSV
+        for nombre in set(nombres_db.keys()) - nombres_csv:
+            p = nombres_db[nombre]
+            if p.activo or p.stock > 0:
+                p.stock = 0
+                p.activo = False
+                desactivados += 1
 
         await db.commit()
+        
+        # 4. ✅ Sincronizar FAISS (opcional, no crítico)
+        sync_status = "No disponible"
+        try:
+            from app.services.retrieval.retriever_factory import get_retriever
+            retriever = get_retriever(db)
+            await retriever.sync_with_db()
+            sync_status = "Exitoso"
+            logging.info("✅ Índice FAISS sincronizado")
+        except ImportError:
+            sync_status = "Módulo no disponible"
+            logging.warning("⚠️ Módulo retriever no disponible")
+        except Exception as e:
+            sync_status = f"Error no crítico: {str(e)[:50]}"
+            logging.warning(f"⚠️ Error sincronizando retriever (no crítico): {e}")
 
-        # 4. Reconstruir el índice FAISS
-        retriever = get_retriever(db)
-        await retriever.sync_with_db()
-
-        return {"message": "Inventario reemplazado correctamente."}
+        return {
+            "success": True,
+            "message": "✅ Inventario actualizado correctamente",
+            "estadisticas": {
+                "productos_creados": creados,
+                "productos_actualizados": actualizados,
+                "productos_desactivados": desactivados,
+                "sync_faiss": sync_status
+            }
+        }
+        
+    except HTTPException:
+        await db.rollback()
+        raise
     except Exception as e:
-        logging.error(f"Error en /productos/reemplazar_csv: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error al reemplazar el inventario desde el CSV")
+        await db.rollback()
+        logging.error(f"Error en reemplazar_csv: {e}")
+        raise HTTPException(status_code=500, detail=f"Error procesando CSV: {str(e)[:100]}")

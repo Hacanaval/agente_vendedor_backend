@@ -28,14 +28,14 @@ async def dashboard_ventas(
         # ✅ CORREGIDO: Manejo más robusto de consultas con verificación de existencia
         try:
             # Ventas totales en el período - verificar que tabla Venta existe
-            result_ventas = await db.execute(
-                select(
-                    func.count(Venta.id).label("total_ventas"),
-                    func.sum(Venta.total).label("ingresos_totales"),
-                    func.avg(Venta.total).label("ticket_promedio")
+        result_ventas = await db.execute(
+            select(
+                func.count(Venta.id).label("total_ventas"),
+                func.sum(Venta.total).label("ingresos_totales"),
+                func.avg(Venta.total).label("ticket_promedio")
                 ).where(Venta.fecha >= fecha_inicio)  # Usar 'fecha' en lugar de 'timestamp'
-            )
-            metricas_ventas = result_ventas.first()
+        )
+        metricas_ventas = result_ventas.first()
         except Exception as e:
             logging.warning(f"Error consultando ventas: {e}. Usando valores por defecto.")
             # Valores por defecto si no hay tabla de ventas o está vacía
@@ -48,26 +48,26 @@ async def dashboard_ventas(
         # Productos más vendidos - con manejo de errores
         productos_top = []
         try:
-            result_productos = await db.execute(
-                select(
-                    Producto.nombre,
-                    func.sum(Venta.cantidad).label("cantidad_vendida"),
-                    func.sum(Venta.total).label("ingresos_producto")
-                )
-                .join(Venta, Producto.id == Venta.producto_id)
-                .where(Venta.fecha >= fecha_inicio)
-                .group_by(Producto.id, Producto.nombre)
-                .order_by(desc("cantidad_vendida"))
-                .limit(10)
+        result_productos = await db.execute(
+            select(
+                Producto.nombre,
+                func.sum(Venta.cantidad).label("cantidad_vendida"),
+                func.sum(Venta.total).label("ingresos_producto")
             )
-            productos_top = [
-                {
-                    "producto": row.nombre,
-                    "cantidad_vendida": row.cantidad_vendida,
-                    "ingresos": float(row.ingresos_producto)
-                }
+            .join(Venta, Producto.id == Venta.producto_id)
+                .where(Venta.fecha >= fecha_inicio)
+            .group_by(Producto.id, Producto.nombre)
+            .order_by(desc("cantidad_vendida"))
+            .limit(10)
+        )
+        productos_top = [
+            {
+                "producto": row.nombre,
+                "cantidad_vendida": row.cantidad_vendida,
+                "ingresos": float(row.ingresos_producto)
+            }
                 for row in result_productos.all()
-            ]
+        ]
         except Exception as e:
             logging.warning(f"Error consultando productos top: {e}")
             productos_top = []
@@ -75,24 +75,24 @@ async def dashboard_ventas(
         # Ventas por día - con manejo de errores
         ventas_diarias = []
         try:
-            result_diarias = await db.execute(
-                select(
+        result_diarias = await db.execute(
+            select(
                     func.date(Venta.fecha).label("fecha"),
-                    func.count(Venta.id).label("ventas"),
-                    func.sum(Venta.total).label("ingresos")
-                )
+                func.count(Venta.id).label("ventas"),
+                func.sum(Venta.total).label("ingresos")
+            )
                 .where(Venta.fecha >= datetime.now() - timedelta(days=7))
                 .group_by(func.date(Venta.fecha))
-                .order_by("fecha")
-            )
-            ventas_diarias = [
-                {
+            .order_by("fecha")
+        )
+        ventas_diarias = [
+            {
                     "fecha": row.fecha.isoformat() if hasattr(row.fecha, 'isoformat') else str(row.fecha),
-                    "ventas": row.ventas,
-                    "ingresos": float(row.ingresos)
-                }
+                "ventas": row.ventas,
+                "ingresos": float(row.ingresos)
+            }
                 for row in result_diarias.all()
-            ]
+        ]
         except Exception as e:
             logging.warning(f"Error consultando ventas diarias: {e}")
             ventas_diarias = []
@@ -100,16 +100,16 @@ async def dashboard_ventas(
         # Conversaciones activas
         conversaciones_activas = 0
         try:
-            result_activas = await db.execute(
-                select(func.count(func.distinct(Mensaje.chat_id)))
-                .where(
-                    and_(
-                        Mensaje.estado_venta.in_(["pendiente", "recolectando_datos"]),
-                        Mensaje.timestamp >= fecha_inicio
-                    )
+        result_activas = await db.execute(
+            select(func.count(func.distinct(Mensaje.chat_id)))
+            .where(
+                and_(
+                    Mensaje.estado_venta.in_(["pendiente", "recolectando_datos"]),
+                    Mensaje.timestamp >= fecha_inicio
                 )
             )
-            conversaciones_activas = result_activas.scalar() or 0
+        )
+        conversaciones_activas = result_activas.scalar() or 0
         except Exception as e:
             logging.warning(f"Error consultando conversaciones activas: {e}")
             conversaciones_activas = 0
@@ -317,19 +317,19 @@ async def estado_inventario(
             # ✅ CORREGIDO: Calcular ventas del último mes con manejo de errores
             ventas_mes_data = {"cantidad": 0, "transacciones": 0}
             try:
-                fecha_mes = datetime.now() - timedelta(days=30)
-                result_ventas = await db.execute(
-                    select(
-                        func.sum(Venta.cantidad).label("vendido_mes"),
-                        func.count(Venta.id).label("transacciones_mes")
-                    ).where(
-                        and_(
-                            Venta.producto_id == row.id,
+            fecha_mes = datetime.now() - timedelta(days=30)
+            result_ventas = await db.execute(
+                select(
+                    func.sum(Venta.cantidad).label("vendido_mes"),
+                    func.count(Venta.id).label("transacciones_mes")
+                ).where(
+                    and_(
+                        Venta.producto_id == row.id,
                             Venta.fecha >= fecha_mes  # Usar 'fecha' en lugar de 'timestamp'
-                        )
                     )
                 )
-                ventas_mes = result_ventas.first()
+            )
+            ventas_mes = result_ventas.first()
                 if ventas_mes:
                     ventas_mes_data = {
                         "cantidad": ventas_mes.vendido_mes or 0,
